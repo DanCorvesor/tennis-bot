@@ -21,10 +21,24 @@ class Notifier:
         self._recipients = recipients
 
     def send_slot_found(self, slot: SlotFound) -> None:
-        raise NotImplementedError
+        body = (
+            f"Tennis slot found: {slot.court_name}, {slot.day} {slot.time}. "
+            f"Pay here within a few mins: {slot.basket_url}"
+        )
+        self._broadcast(body)
 
     def send_nothing_available(self) -> None:
-        raise NotImplementedError
+        self._broadcast(
+            "No tennis slots found this week after the full retry window."
+        )
 
     def send_error(self, description: str) -> None:
-        raise NotImplementedError
+        self._broadcast(f"Tennis bot error: {description}")
+
+    def _broadcast(self, body: str) -> None:
+        for number in self._recipients:
+            self._client.messages.create(
+                from_=self._from,
+                to=f"whatsapp:{number}",
+                body=body,
+            )
