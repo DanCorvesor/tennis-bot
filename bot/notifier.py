@@ -33,12 +33,13 @@ class Notifier:
         )
 
     def send_error(self, description: str) -> None:
-        self._broadcast(f"Tennis bot error: {description}")
+        msg = f"Tennis bot error: {description}"
+        self._broadcast(msg[:1600])
 
     def _broadcast(self, body: str) -> None:
         for number in self._recipients:
             self._client.messages.create(
                 from_=self._from,
-                to=f"whatsapp:{number}",
+                to=number,
                 body=body,
             )

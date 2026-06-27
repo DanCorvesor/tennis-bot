@@ -11,9 +11,9 @@ LTA_PASSWORD=hunter2
 CLUBSPARK_EMAIL=dan@example.com
 TWILIO_ACCOUNT_SID=AC123
 TWILIO_AUTH_TOKEN=tok456
-TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
-TWILIO_WHATSAPP_TO=whatsapp:+447512211264
-WHATSAPP_ALLOWLIST=+447512211264,+447700900001
+TWILIO_FROM=+14155238886
+TWILIO_TO=+447512211264
+SMS_RECIPIENTS=+447512211264,+447700900001
 COURTS=https://clubspark.lta.org.uk/SouthwarkPark,https://clubspark.lta.org.uk/BrunswickPark,https://clubspark.lta.org.uk/BurgessParkSouthwark
 PREFERRED_TIMES=10:00,11:00,09:00
 BOOKING_DAYS=Saturday,Sunday
@@ -28,9 +28,9 @@ REQUIRED_FIELDS = [
     "CLUBSPARK_EMAIL",
     "TWILIO_ACCOUNT_SID",
     "TWILIO_AUTH_TOKEN",
-    "TWILIO_WHATSAPP_FROM",
-    "TWILIO_WHATSAPP_TO",
-    "WHATSAPP_ALLOWLIST",
+    "TWILIO_FROM",
+    "TWILIO_TO",
+    "SMS_RECIPIENTS",
     "COURTS",
     "PREFERRED_TIMES",
     "BOOKING_DAYS",
@@ -53,8 +53,8 @@ def test_load_config_returns_config_with_all_fields(env_file: Path):
     assert cfg.clubspark_email == "dan@example.com"
     assert cfg.twilio_account_sid == "AC123"
     assert cfg.twilio_auth_token == "tok456"
-    assert cfg.twilio_whatsapp_from == "whatsapp:+14155238886"
-    assert cfg.twilio_whatsapp_to == "whatsapp:+447512211264"
+    assert cfg.twilio_from == "+14155238886"
+    assert cfg.twilio_to == "+447512211264"
 
 
 def test_preferred_times_is_ordered_list(env_file: Path):
@@ -71,10 +71,10 @@ def test_courts_is_list_of_urls(env_file: Path):
     ]
 
 
-def test_whatsapp_allowlist_is_list_of_strings(env_file: Path):
+def test_sms_recipients_is_list_of_strings(env_file: Path):
     cfg = load_config(env_file)
-    assert cfg.whatsapp_allowlist == ["+447512211264", "+447700900001"]
-    assert all(isinstance(n, str) for n in cfg.whatsapp_allowlist)
+    assert cfg.sms_recipients == ["+447512211264", "+447700900001"]
+    assert all(isinstance(n, str) for n in cfg.sms_recipients)
 
 
 def test_booking_days_is_list(env_file: Path):

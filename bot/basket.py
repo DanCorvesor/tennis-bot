@@ -6,22 +6,16 @@ class BasketManager:
     def __init__(self, page) -> None:
         self._page = page
 
-    def add_to_basket(self, booking_url: str) -> str:
+    def add_to_basket(self, slot_id: str) -> str:
         page = self._page
-        page.goto(booking_url)
 
-        if page.locator(".booking-unavailable, .error-message").count() > 0:
+        slot_link = page.locator(f'a[data-test-id="{slot_id}"]')
+        if slot_link.count() == 0:
             raise SlotUnavailableError(
-                f"Slot at {booking_url} is no longer available."
+                f"Slot {slot_id} is no longer available."
             )
 
-        confirm = page.locator(
-            'button.basket-btn, button:has-text("Add to basket"), button:has-text("Confirm")'
-        )
-        if confirm.count() == 0:
-            raise SlotUnavailableError(
-                f"No basket / confirm button on {booking_url}; slot likely gone."
-            )
-        confirm.first.click()
-        page.wait_for_url("**/basket/**", timeout=15_000)
+        slot_link.click()
+        page.get_by_role("button", name="Continue booking").click()
+        page.get_by_role("button", name="Confirm and pay").wait_for(timeout=15_000)
         return page.url

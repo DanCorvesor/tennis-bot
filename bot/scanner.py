@@ -53,30 +53,27 @@ def court_name_from_url(url: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", " ", slug)
 
 
-def make_playwright_probe(page, today: date | None = None):
-    """Build an availability probe that asks a Playwright page for a given (court, day, time).
+def _time_to_minutes(time: str) -> int:
+    hours, mins = time.split(":")
+    return int(hours) * 60 + int(mins)
 
-    The probe navigates to the court's booking page for the target date and looks for
-    a 1-hour "Book" link at the requested time. Returns the booking URL or None.
-    """
+
+def make_playwright_probe(page, today: date | None = None):
     ref = today or date.today()
 
     def probe(court_url: str, day: str, time: str) -> str | None:
         target = _next_weekday(ref, day)
         url = f"{court_url.rstrip('/')}/Booking/BookByDate#?date={target.isoformat()}&role=member"
-        page.goto(url, wait_until="networkidle")
+        page.goto(url)
+        page.locator("a.book-interval").first.wait_for(timeout=30_000)
 
-        book_link = page.locator(
-            f'a.book-interval:not(.unavailable):has-text("{time}")'
+        minutes = _time_to_minutes(time)
+        slot_link = page.locator(
+            f'a.book-interval.not-booked[data-test-id$="|{minutes}"]'
         ).first
-        if book_link.count() == 0:
+        if slot_link.count() == 0:
             return None
-        href = book_link.get_attribute("href")
-        if not href:
-            return None
-        if href.startswith("/"):
-            return f"https://clubspark.lta.org.uk{href}"
-        return href
+        return slot_link.get_attribute("data-test-id")
 
     return probe
 

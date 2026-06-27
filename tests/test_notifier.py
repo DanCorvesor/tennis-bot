@@ -5,7 +5,7 @@ import pytest
 from bot.notifier import Notifier, SlotFound
 
 
-FROM = "whatsapp:+14155238886"
+FROM = "+14155238886"
 RECIPIENTS = ["+447512211264", "+447700900001"]
 
 
@@ -43,7 +43,7 @@ def test_slot_found_sent_to_every_recipient(notifier, twilio_client):
     notifier.send_slot_found(slot)
 
     assert twilio_client.messages.create.call_count == len(RECIPIENTS)
-    assert _tos(twilio_client) == [f"whatsapp:{n}" for n in RECIPIENTS]
+    assert _tos(twilio_client) == RECIPIENTS
     for body in _bodies(twilio_client):
         assert "Southwark Park" in body
         assert "Saturday" in body
@@ -55,7 +55,7 @@ def test_nothing_available_sent_to_every_recipient(notifier, twilio_client):
     notifier.send_nothing_available()
 
     assert twilio_client.messages.create.call_count == len(RECIPIENTS)
-    assert _tos(twilio_client) == [f"whatsapp:{n}" for n in RECIPIENTS]
+    assert _tos(twilio_client) == RECIPIENTS
     for body in _bodies(twilio_client):
         assert body.strip() != ""
 
@@ -64,7 +64,7 @@ def test_error_message_includes_description(notifier, twilio_client):
     notifier.send_error("Login page timed out after 30s")
 
     assert twilio_client.messages.create.call_count == len(RECIPIENTS)
-    assert _tos(twilio_client) == [f"whatsapp:{n}" for n in RECIPIENTS]
+    assert _tos(twilio_client) == RECIPIENTS
     for body in _bodies(twilio_client):
         assert "Login page timed out after 30s" in body
 

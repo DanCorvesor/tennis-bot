@@ -11,9 +11,9 @@ class Config:
     clubspark_email: str
     twilio_account_sid: str
     twilio_auth_token: str
-    twilio_whatsapp_from: str
-    twilio_whatsapp_to: str
-    whatsapp_allowlist: list[str]
+    twilio_from: str
+    twilio_to: str
+    sms_recipients: list[str]
     courts: list[str]
     preferred_times: list[str]
     booking_days: list[str]
@@ -35,9 +35,9 @@ _REQUIRED = (
     "CLUBSPARK_EMAIL",
     "TWILIO_ACCOUNT_SID",
     "TWILIO_AUTH_TOKEN",
-    "TWILIO_WHATSAPP_FROM",
-    "TWILIO_WHATSAPP_TO",
-    "WHATSAPP_ALLOWLIST",
+    "TWILIO_FROM",
+    "TWILIO_TO",
+    "SMS_RECIPIENTS",
     "COURTS",
     "PREFERRED_TIMES",
     "BOOKING_DAYS",
@@ -74,9 +74,9 @@ def load_config(env_path: str | Path | None = None) -> Config:
         clubspark_email=values["CLUBSPARK_EMAIL"],
         twilio_account_sid=values["TWILIO_ACCOUNT_SID"],
         twilio_auth_token=values["TWILIO_AUTH_TOKEN"],
-        twilio_whatsapp_from=values["TWILIO_WHATSAPP_FROM"],
-        twilio_whatsapp_to=values["TWILIO_WHATSAPP_TO"],
-        whatsapp_allowlist=_split(values["WHATSAPP_ALLOWLIST"]),
+        twilio_from=values["TWILIO_FROM"],
+        twilio_to=values["TWILIO_TO"],
+        sms_recipients=_split(values["SMS_RECIPIENTS"]),
         courts=_split(values["COURTS"]),
         preferred_times=_split(values["PREFERRED_TIMES"]),
         booking_days=_split(values["BOOKING_DAYS"]),

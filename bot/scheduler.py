@@ -92,8 +92,8 @@ def main() -> int:
     twilio_client = TwilioClient(config.twilio_account_sid, config.twilio_auth_token)
     notifier = Notifier(
         twilio_client=twilio_client,
-        from_number=config.twilio_whatsapp_from,
-        recipients=config.whatsapp_allowlist,
+        from_number=config.twilio_from,
+        recipients=config.sms_recipients,
     )
 
     try:
