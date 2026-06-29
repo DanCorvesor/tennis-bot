@@ -33,7 +33,8 @@ def test_returns_checkout_url_on_success():
     url = basket.add_to_basket(SLOT_ID)
 
     assert url == CHECKOUT_URL
-    page.locator.assert_called_once_with(f'a[data-test-id="{SLOT_ID}"]')
+    page.locator.assert_any_call(f'a[data-test-id="{SLOT_ID}"]')
+    page.locator.assert_any_call("#booking-duration")
 
 
 def test_raises_when_slot_no_longer_available():

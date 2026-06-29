@@ -12,7 +12,7 @@ CLUBSPARK_EMAIL=dan@example.com
 TWILIO_ACCOUNT_SID=AC123
 TWILIO_AUTH_TOKEN=tok456
 TWILIO_FROM=+14155238886
-SMS_RECIPIENTS=+447512211264,+447700900001
+SMS_RECIPIENTS=Alice:+447512211264,Bob:+447700900001
 COURTS=https://clubspark.lta.org.uk/SouthwarkPark,https://clubspark.lta.org.uk/BrunswickPark,https://clubspark.lta.org.uk/BurgessParkSouthwark
 PREFERRED_TIMES=10:00,11:00,09:00
 BOOKING_DAYS=Saturday,Sunday
@@ -68,10 +68,9 @@ def test_courts_is_list_of_urls(env_file: Path):
     ]
 
 
-def test_sms_recipients_is_list_of_strings(env_file: Path):
+def test_sms_recipients_is_list_of_name_number_tuples(env_file: Path):
     cfg = load_config(env_file)
-    assert cfg.sms_recipients == ["+447512211264", "+447700900001"]
-    assert all(isinstance(n, str) for n in cfg.sms_recipients)
+    assert cfg.sms_recipients == [("Alice", "+447512211264"), ("Bob", "+447700900001")]
 
 
 def test_booking_days_is_list(env_file: Path):

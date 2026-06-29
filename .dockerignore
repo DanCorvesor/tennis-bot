@@ -1,0 +1,13 @@
+.venv/
+.state/
+.env
+__pycache__/
+*.pyc
+.git/
+.pytest_cache/
+tests/
+ralph/
+scripts/
+docs/
+issues/
+.claude/

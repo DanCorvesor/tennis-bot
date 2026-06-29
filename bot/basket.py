@@ -3,8 +3,9 @@ class SlotUnavailableError(RuntimeError):
 
 
 class BasketManager:
-    def __init__(self, page) -> None:
+    def __init__(self, page, duration_minutes: int = 60) -> None:
         self._page = page
+        self._duration_minutes = duration_minutes
 
     def add_to_basket(self, slot_id: str) -> str:
         page = self._page
@@ -18,6 +19,11 @@ class BasketManager:
 
         slot_link.scroll_into_view_if_needed()
         slot_link.click()
+
+        start_minutes = int(slot_id.rsplit("|", 1)[-1])
+        end_minutes = str(start_minutes + self._duration_minutes)
+        page.locator("#booking-duration").select_option(value=end_minutes)
+
         page.get_by_role("button", name="Continue booking").click()
         page.get_by_role("button", name="Confirm and pay").wait_for(timeout=15_000)
         return page.url

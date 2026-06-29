@@ -26,12 +26,14 @@ class Scheduler:
         basket: BasketManager,
         notifier: Notifier,
         *,
+        duration_hours: int = 1,
         now: Callable[[], datetime] = datetime.now,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._scanner = scanner
         self._basket = basket
         self._notifier = notifier
+        self._duration_hours = duration_hours
         self._now = now
         self._sleep = sleep
 
@@ -48,6 +50,7 @@ class Scheduler:
                     court_name=slot.court_name,
                     day=slot.day,
                     time=slot.time,
+                    duration_hours=self._duration_hours,
                     basket_url=basket_url,
                 )
             )
@@ -111,9 +114,9 @@ def main() -> int:
                 courts=config.courts,
                 priorities=priorities,
             )
-            basket = BasketManager(session.page)
+            basket = BasketManager(session.page, duration_minutes=config.slot_duration_hours * 60)
 
-            return Scheduler(scanner, basket, notifier).run()
+            return Scheduler(scanner, basket, notifier, duration_hours=config.slot_duration_hours).run()
     except Exception as exc:
         notifier.send_error(f"Bot startup failure: {type(exc).__name__}: {exc}\n{traceback.format_exc()}")
         return 1

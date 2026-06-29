@@ -6,7 +6,7 @@ from bot.notifier import Notifier, SlotFound
 
 
 FROM = "+14155238886"
-RECIPIENTS = ["+447512211264", "+447700900001"]
+RECIPIENTS = [("Alice", "+447512211264"), ("Bob", "+447700900001")]
 
 
 @pytest.fixture
@@ -38,16 +38,20 @@ def test_slot_found_sent_to_every_recipient(notifier, twilio_client):
         court_name="Southwark Park",
         day="Saturday",
         time="10:00",
+        duration_hours=1,
         basket_url="https://clubspark.lta.org.uk/basket/abc123",
     )
     notifier.send_slot_found(slot)
 
     assert twilio_client.messages.create.call_count == len(RECIPIENTS)
-    assert _tos(twilio_client) == RECIPIENTS
-    for body in _bodies(twilio_client):
+    assert _tos(twilio_client) == [num for _, num in RECIPIENTS]
+    bodies = _bodies(twilio_client)
+    assert "Hey Alice!" in bodies[0]
+    assert "Hey Bob!" in bodies[1]
+    for body in bodies:
         assert "Southwark Park" in body
         assert "Saturday" in body
-        assert "10:00" in body
+        assert "10AM-11AM" in body
         assert "https://clubspark.lta.org.uk/basket/abc123" in body
 
 
@@ -55,7 +59,7 @@ def test_nothing_available_sent_to_every_recipient(notifier, twilio_client):
     notifier.send_nothing_available()
 
     assert twilio_client.messages.create.call_count == len(RECIPIENTS)
-    assert _tos(twilio_client) == RECIPIENTS
+    assert _tos(twilio_client) == [num for _, num in RECIPIENTS]
     for body in _bodies(twilio_client):
         assert body.strip() != ""
 
@@ -64,7 +68,7 @@ def test_error_message_includes_description(notifier, twilio_client):
     notifier.send_error("Login page timed out after 30s")
 
     assert twilio_client.messages.create.call_count == len(RECIPIENTS)
-    assert _tos(twilio_client) == RECIPIENTS
+    assert _tos(twilio_client) == [num for _, num in RECIPIENTS]
     for body in _bodies(twilio_client):
         assert "Login page timed out after 30s" in body
 
@@ -76,7 +80,7 @@ def test_from_number_is_taken_from_constructor(notifier, twilio_client):
 
 def test_each_recipient_is_a_separate_api_call(notifier, twilio_client):
     notifier.send_slot_found(
-        SlotFound(court_name="X", day="Sunday", time="11:00", basket_url="https://example")
+        SlotFound(court_name="X", day="Sunday", time="11:00", duration_hours=1, basket_url="https://example")
     )
     notifier.send_nothing_available()
     notifier.send_error("boom")

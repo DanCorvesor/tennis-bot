@@ -12,7 +12,7 @@ class Config:
     twilio_account_sid: str
     twilio_auth_token: str
     twilio_from: str
-    sms_recipients: list[str]
+    sms_recipients: list[tuple[str, str]]
     courts: list[str]
     preferred_times: list[str]
     booking_days: list[str]
@@ -47,6 +47,18 @@ def _split(value: str) -> list[str]:
     return [p.strip() for p in value.split(",") if p.strip()]
 
 
+def _parse_recipients(value: str) -> list[tuple[str, str]]:
+    recipients = []
+    for entry in _split(value):
+        if ":" not in entry:
+            raise ConfigError(
+                f"SMS_RECIPIENTS entries must be Name:+number, got {entry!r}"
+            )
+        name, number = entry.split(":", 1)
+        recipients.append((name.strip(), number.strip()))
+    return recipients
+
+
 def load_config(env_path: str | Path | None = None) -> Config:
     path = Path(env_path) if env_path else Path(".env")
     values = dotenv_values(path)
@@ -73,7 +85,7 @@ def load_config(env_path: str | Path | None = None) -> Config:
         twilio_account_sid=values["TWILIO_ACCOUNT_SID"],
         twilio_auth_token=values["TWILIO_AUTH_TOKEN"],
         twilio_from=values["TWILIO_FROM"],
-        sms_recipients=_split(values["SMS_RECIPIENTS"]),
+        sms_recipients=_parse_recipients(values["SMS_RECIPIENTS"]),
         courts=_split(values["COURTS"]),
         preferred_times=_split(values["PREFERRED_TIMES"]),
         booking_days=_split(values["BOOKING_DAYS"]),

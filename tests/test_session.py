@@ -15,7 +15,7 @@ def _config(tmp_path: Path) -> Config:
         twilio_account_sid="AC",
         twilio_auth_token="tok",
         twilio_from="+1",
-        sms_recipients=["+44"],
+        sms_recipients=[("Test", "+44")],
         courts=["https://clubspark.lta.org.uk/a"],
         preferred_times=["10:00"],
         booking_days=["Saturday"],
