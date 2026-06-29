@@ -61,9 +61,9 @@ class SessionManager:
 
 def playwright_browser_factory(playwright, headless: bool = True) -> BrowserFactory:
     def factory(storage_state: Path | None) -> BrowserSession:
-        browser = playwright.chromium.launch(headless=headless)
+        browser = playwright.firefox.launch(headless=headless)
         context = browser.new_context(
-            storage_state=str(storage_state) if storage_state else None
+            storage_state=str(storage_state) if storage_state else None,
         )
         page = context.new_page()
         return BrowserSession(browser=browser, context=context, page=page)

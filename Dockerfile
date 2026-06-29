@@ -13,7 +13,7 @@ RUN uv sync --frozen --no-dev
 
 COPY bot/ bot/
 
-RUN uv run playwright install --with-deps chromium
+RUN uv run playwright install --with-deps firefox
 
 VOLUME /app/.state
 ENV PYTHONUNBUFFERED=1
