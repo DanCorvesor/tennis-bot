@@ -61,11 +61,23 @@ def _time_to_minutes(time: str) -> int:
 def make_playwright_probe(page, today: date | None = None):
     ref = today or date.today()
 
+    last_url = [None]
+
     def probe(court_url: str, day: str, time: str) -> str | None:
         target = _next_weekday(ref, day)
-        url = f"{court_url.rstrip('/')}/Booking/BookByDate#?date={target.isoformat()}&role=member"
-        page.goto(url)
-        page.locator("a.book-interval").first.wait_for(timeout=30_000)
+        base = f"{court_url.rstrip('/')}/Booking/BookByDate"
+        url = f"{base}#?date={target.isoformat()}&role=member"
+
+        if url != last_url[0]:
+            current_base = page.url.split("#")[0]
+            if current_base != base:
+                page.goto(url)
+                page.locator(".time-slot").first.wait_for(timeout=30_000)
+            page.evaluate(
+                f"window.location.hash = '?date={target.isoformat()}&role=member'"
+            )
+            page.wait_for_timeout(3000)
+            last_url[0] = url
 
         minutes = _time_to_minutes(time)
         slot_link = page.locator(

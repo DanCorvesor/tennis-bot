@@ -73,7 +73,11 @@ def playwright_browser_factory(playwright, headless: bool = True) -> BrowserFact
 
 def clubspark_login(session: BrowserSession, config: Config) -> None:
     page = session.page
-    page.goto("https://clubspark.lta.org.uk/SouthwarkPark/Booking")
+    page.goto("https://clubspark.lta.org.uk/SouthwarkPark/Booking", wait_until="domcontentloaded")
+    page.get_by_test_id("sign-in-link").wait_for(timeout=30_000)
+    accept_btn = page.get_by_role("button", name="Accept All")
+    if accept_btn.is_visible():
+        accept_btn.click()
     page.get_by_test_id("sign-in-link").click()
     page.locator('button[value="LTA2"]').click()
     page.get_by_role("textbox", name="Username").fill(config.lta_username)

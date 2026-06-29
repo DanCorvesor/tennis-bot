@@ -12,7 +12,6 @@ CLUBSPARK_EMAIL=dan@example.com
 TWILIO_ACCOUNT_SID=AC123
 TWILIO_AUTH_TOKEN=tok456
 TWILIO_FROM=+14155238886
-TWILIO_TO=+447512211264
 SMS_RECIPIENTS=+447512211264,+447700900001
 COURTS=https://clubspark.lta.org.uk/SouthwarkPark,https://clubspark.lta.org.uk/BrunswickPark,https://clubspark.lta.org.uk/BurgessParkSouthwark
 PREFERRED_TIMES=10:00,11:00,09:00
@@ -29,7 +28,6 @@ REQUIRED_FIELDS = [
     "TWILIO_ACCOUNT_SID",
     "TWILIO_AUTH_TOKEN",
     "TWILIO_FROM",
-    "TWILIO_TO",
     "SMS_RECIPIENTS",
     "COURTS",
     "PREFERRED_TIMES",
@@ -54,7 +52,6 @@ def test_load_config_returns_config_with_all_fields(env_file: Path):
     assert cfg.twilio_account_sid == "AC123"
     assert cfg.twilio_auth_token == "tok456"
     assert cfg.twilio_from == "+14155238886"
-    assert cfg.twilio_to == "+447512211264"
 
 
 def test_preferred_times_is_ordered_list(env_file: Path):

@@ -12,7 +12,6 @@ class Config:
     twilio_account_sid: str
     twilio_auth_token: str
     twilio_from: str
-    twilio_to: str
     sms_recipients: list[str]
     courts: list[str]
     preferred_times: list[str]
@@ -36,7 +35,6 @@ _REQUIRED = (
     "TWILIO_ACCOUNT_SID",
     "TWILIO_AUTH_TOKEN",
     "TWILIO_FROM",
-    "TWILIO_TO",
     "SMS_RECIPIENTS",
     "COURTS",
     "PREFERRED_TIMES",
@@ -75,7 +73,6 @@ def load_config(env_path: str | Path | None = None) -> Config:
         twilio_account_sid=values["TWILIO_ACCOUNT_SID"],
         twilio_auth_token=values["TWILIO_AUTH_TOKEN"],
         twilio_from=values["TWILIO_FROM"],
-        twilio_to=values["TWILIO_TO"],
         sms_recipients=_split(values["SMS_RECIPIENTS"]),
         courts=_split(values["COURTS"]),
         preferred_times=_split(values["PREFERRED_TIMES"]),
