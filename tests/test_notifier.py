@@ -64,15 +64,6 @@ def test_nothing_available_sent_to_every_recipient(notifier, twilio_client):
         assert body.strip() != ""
 
 
-def test_error_message_includes_description(notifier, twilio_client):
-    notifier.send_error("Login page timed out after 30s")
-
-    assert twilio_client.messages.create.call_count == len(RECIPIENTS)
-    assert _tos(twilio_client) == [num for _, num in RECIPIENTS]
-    for body in _bodies(twilio_client):
-        assert "Login page timed out after 30s" in body
-
-
 def test_from_number_is_taken_from_constructor(notifier, twilio_client):
     notifier.send_nothing_available()
     assert _froms(twilio_client) == [FROM] * len(RECIPIENTS)
@@ -83,6 +74,5 @@ def test_each_recipient_is_a_separate_api_call(notifier, twilio_client):
         SlotFound(court_name="X", day="Sunday", time="11:00", duration_hours=1, basket_url="https://example")
     )
     notifier.send_nothing_available()
-    notifier.send_error("boom")
 
-    assert twilio_client.messages.create.call_count == 3 * len(RECIPIENTS)
+    assert twilio_client.messages.create.call_count == 2 * len(RECIPIENTS)

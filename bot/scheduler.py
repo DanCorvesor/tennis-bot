@@ -5,7 +5,7 @@ from typing import Callable
 
 from bot.basket import BasketManager
 from bot.config import load_config
-from bot.notifier import Notifier, SlotFound
+from bot.notifier import Notifier, NtfyNotifier, SlotFound
 from bot.scanner import CourtScanner, Slot, build_priorities, make_playwright_probe
 from bot.session import (
     SessionManager,
@@ -27,6 +27,7 @@ class Scheduler:
         notifier: Notifier,
         *,
         duration_hours: int = 1,
+        release_hour: int = 20,
         now: Callable[[], datetime] = datetime.now,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -34,6 +35,7 @@ class Scheduler:
         self._basket = basket
         self._notifier = notifier
         self._duration_hours = duration_hours
+        self._release_hour = release_hour
         self._now = now
         self._sleep = sleep
 
@@ -55,12 +57,12 @@ class Scheduler:
                 )
             )
             return 0
-        except Exception as exc:
-            self._notifier.send_error(f"{type(exc).__name__}: {exc}")
+        except Exception:
+            traceback.print_exc()
             return 1
 
     def _poll_until_found_or_timeout(self) -> Slot | None:
-        release_at = _today_release_time(self._now())
+        release_at = _today_release_time(self._now(), self._release_hour)
         deadline = release_at + RETRY_WINDOW
 
         while True:
@@ -80,8 +82,8 @@ def poll_interval_seconds(now: datetime, release_at: datetime) -> float:
     return 5
 
 
-def _today_release_time(now: datetime) -> datetime:
-    return now.replace(hour=20, minute=0, second=0, microsecond=0)
+def _today_release_time(now: datetime, release_hour: int = 20) -> datetime:
+    return now.replace(hour=release_hour, minute=0, second=0, microsecond=0)
 
 
 def main() -> int:
@@ -90,14 +92,17 @@ def main() -> int:
     config = load_config()
     priorities = build_priorities(config.booking_days, config.preferred_times)
 
-    from twilio.rest import Client as TwilioClient  # noqa: import-outside-toplevel
+    if config.notify_method == "ntfy":
+        notifier = NtfyNotifier(config.ntfy_topic)
+    else:
+        from twilio.rest import Client as TwilioClient  # noqa: import-outside-toplevel
 
-    twilio_client = TwilioClient(config.twilio_account_sid, config.twilio_auth_token)
-    notifier = Notifier(
-        twilio_client=twilio_client,
-        from_number=config.twilio_from,
-        recipients=config.sms_recipients,
-    )
+        twilio_client = TwilioClient(config.twilio_account_sid, config.twilio_auth_token)
+        notifier = Notifier(
+            twilio_client=twilio_client,
+            from_number=config.twilio_from,
+            recipients=config.sms_recipients,
+        )
 
     try:
         with sync_playwright() as p:
@@ -116,9 +121,13 @@ def main() -> int:
             )
             basket = BasketManager(session.page, duration_minutes=config.slot_duration_hours * 60)
 
-            return Scheduler(scanner, basket, notifier, duration_hours=config.slot_duration_hours).run()
-    except Exception as exc:
-        notifier.send_error(f"Bot startup failure: {type(exc).__name__}: {exc}\n{traceback.format_exc()}")
+            return Scheduler(
+                scanner, basket, notifier,
+                duration_hours=config.slot_duration_hours,
+                release_hour=config.release_hour,
+            ).run()
+    except Exception:
+        traceback.print_exc()
         return 1
 
 

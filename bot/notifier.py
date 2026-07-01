@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from urllib.request import Request, urlopen
 
 
 @dataclass(frozen=True)
@@ -54,10 +55,6 @@ class Notifier:
             "No tennis slots found this week after the full retry window."
         )
 
-    def send_error(self, description: str) -> None:
-        msg = f"Tennis bot error: {description}"
-        self._broadcast(msg[:1600])
-
     def _broadcast(self, body: str) -> None:
         for _, number in self._recipients:
             self._client.messages.create(
@@ -65,3 +62,39 @@ class Notifier:
                 to=number,
                 body=body,
             )
+
+
+def _slugify(name: str) -> str:
+    return name.lower().replace(" ", "-")
+
+
+class NtfyNotifier:
+    def __init__(self, topic_prefix: str) -> None:
+        self._prefix = topic_prefix
+
+    def send_slot_found(self, slot: SlotFound) -> None:
+        time_range = _format_time_range(slot.time, slot.duration_hours)
+        title = f"Tennis slot: {slot.court_name}, {slot.day} {time_range}"
+        body = (
+            "Hey future Federers and wanting Williams! "
+            "Be quick to book it, if you are gonna pay, message in the group "
+            "to let everyone know."
+        )
+        url = f"https://ntfy.sh/{self._prefix}-{_slugify(slot.court_name)}"
+        req = Request(url, data=body.encode())
+        req.add_header("Title", title)
+        req.add_header("Priority", "high")
+        req.add_header("Tags", "tennis")
+        req.add_header("Click", slot.basket_url)
+        req.add_header("Actions", f"view, Book now, {slot.basket_url}")
+        urlopen(req)
+
+    def send_nothing_available(self) -> None:
+        url = f"https://ntfy.sh/{self._prefix}"
+        req = Request(
+            url,
+            data=b"No tennis slots found this week after the full retry window.",
+        )
+        req.add_header("Title", "No tennis slots")
+        req.add_header("Priority", "low")
+        urlopen(req)

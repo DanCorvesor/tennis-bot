@@ -9,15 +9,18 @@ class Config:
     lta_username: str
     lta_password: str
     clubspark_email: str
-    twilio_account_sid: str
-    twilio_auth_token: str
-    twilio_from: str
-    sms_recipients: list[tuple[str, str]]
+    notify_method: str
     courts: list[str]
     preferred_times: list[str]
     booking_days: list[str]
     slot_duration_hours: int
+    release_hour: int
     session_state_path: Path
+    ntfy_topic: str | None = None
+    twilio_account_sid: str | None = None
+    twilio_auth_token: str | None = None
+    twilio_from: str | None = None
+    sms_recipients: list[tuple[str, str]] | None = None
     card_number: str | None = None
     card_expiry: str | None = None
     card_cvv: str | None = None
@@ -32,15 +35,15 @@ _REQUIRED = (
     "LTA_USERNAME",
     "LTA_PASSWORD",
     "CLUBSPARK_EMAIL",
-    "TWILIO_ACCOUNT_SID",
-    "TWILIO_AUTH_TOKEN",
-    "TWILIO_FROM",
-    "SMS_RECIPIENTS",
+    "NOTIFY_METHOD",
     "COURTS",
     "PREFERRED_TIMES",
     "BOOKING_DAYS",
     "SLOT_DURATION_HOURS",
 )
+
+_TWILIO_REQUIRED = ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM", "SMS_RECIPIENTS")
+_NTFY_REQUIRED = ("NTFY_TOPIC",)
 
 
 def _split(value: str) -> list[str]:
@@ -69,6 +72,24 @@ def load_config(env_path: str | Path | None = None) -> Config:
             f"Missing required .env variable(s): {', '.join(missing)}"
         )
 
+    notify_method = values["NOTIFY_METHOD"]
+    if notify_method == "twilio":
+        extra_missing = [k for k in _TWILIO_REQUIRED if not values.get(k)]
+        if extra_missing:
+            raise ConfigError(
+                f"NOTIFY_METHOD=twilio requires: {', '.join(extra_missing)}"
+            )
+    elif notify_method == "ntfy":
+        extra_missing = [k for k in _NTFY_REQUIRED if not values.get(k)]
+        if extra_missing:
+            raise ConfigError(
+                f"NOTIFY_METHOD=ntfy requires: {', '.join(extra_missing)}"
+            )
+    else:
+        raise ConfigError(
+            f"NOTIFY_METHOD must be 'twilio' or 'ntfy', got {notify_method!r}"
+        )
+
     try:
         slot_hours = int(values["SLOT_DURATION_HOURS"])
     except ValueError as exc:
@@ -76,16 +97,22 @@ def load_config(env_path: str | Path | None = None) -> Config:
             f"SLOT_DURATION_HOURS must be an integer, got {values['SLOT_DURATION_HOURS']!r}"
         ) from exc
 
+    release_hour = int(values.get("RELEASE_HOUR") or "20")
     session_state = values.get("SESSION_STATE_PATH") or ".state/session.json"
+
+    sms_raw = values.get("SMS_RECIPIENTS")
 
     return Config(
         lta_username=values["LTA_USERNAME"],
         lta_password=values["LTA_PASSWORD"],
         clubspark_email=values["CLUBSPARK_EMAIL"],
-        twilio_account_sid=values["TWILIO_ACCOUNT_SID"],
-        twilio_auth_token=values["TWILIO_AUTH_TOKEN"],
-        twilio_from=values["TWILIO_FROM"],
-        sms_recipients=_parse_recipients(values["SMS_RECIPIENTS"]),
+        release_hour=release_hour,
+        notify_method=notify_method,
+        ntfy_topic=values.get("NTFY_TOPIC") or None,
+        twilio_account_sid=values.get("TWILIO_ACCOUNT_SID") or None,
+        twilio_auth_token=values.get("TWILIO_AUTH_TOKEN") or None,
+        twilio_from=values.get("TWILIO_FROM") or None,
+        sms_recipients=_parse_recipients(sms_raw) if sms_raw else None,
         courts=_split(values["COURTS"]),
         preferred_times=_split(values["PREFERRED_TIMES"]),
         booking_days=_split(values["BOOKING_DAYS"]),
