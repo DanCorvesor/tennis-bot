@@ -35,6 +35,8 @@ class CourtScanner:
         self._priorities = priorities
 
     def scan(self) -> Slot | None:
+        if hasattr(self._probe, "clear_cache"):
+            self._probe.clear_cache()
         for day, time in self._priorities:
             for court_url in self._courts:
                 slot = self._probe(court_url, day, time)
@@ -96,6 +98,9 @@ def make_api_probe(duration_minutes: int = 60, today: date | None = None):
     ref = today or date.today()
     cache: dict[tuple[str, str], dict] = {}
 
+    def clear_cache() -> None:
+        cache.clear()
+
     def probe(court_url: str, day: str, time: str) -> Slot | None:
         slug = _venue_slug(court_url)
         target = _next_weekday(ref, day)
@@ -153,6 +158,7 @@ def make_api_probe(duration_minutes: int = 60, today: date | None = None):
         log.info("No slot: %s %s %s", name, day, time)
         return None
 
+    probe.clear_cache = clear_cache
     return probe
 
 
