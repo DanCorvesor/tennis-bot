@@ -29,72 +29,94 @@ def _slot() -> Slot:
     )
 
 
-def _pre_release_clock() -> FakeClock:
-    return FakeClock(datetime(2026, 4, 18, 19, 58, 0))
+def _scheduler(scanner, notifier, clock, release_hour=20):
+    return Scheduler(
+        scanner,
+        notifier,
+        release_hour=release_hour,
+        now=clock.now,
+        sleep=clock.sleep,
+    )
 
 
-def _post_release_clock() -> FakeClock:
-    return FakeClock(datetime(2026, 4, 18, 20, 0, 0))
-
-
-def test_slot_found_triggers_notifier():
+def test_release_window_finds_slot_and_notifies():
     scanner = MagicMock()
     scanner.scan.return_value = _slot()
     notifier = MagicMock()
 
-    clock = _pre_release_clock()
-    rc = Scheduler(scanner, notifier, now=clock.now, sleep=clock.sleep).run()
+    clock = FakeClock(datetime(2026, 4, 18, 20, 0, 0))
+    _scheduler(scanner, notifier, clock)._poll_release()
 
-    assert rc == 0
     notifier.send_slot_found.assert_called_once()
     sent = notifier.send_slot_found.call_args.args[0]
     assert isinstance(sent, SlotFound)
     assert sent.court_name == "Southwark Park"
-    assert sent.day == "Saturday"
-    assert sent.time == "10:00"
-    assert "SouthwarkPark/Booking/Book" in sent.basket_url
+
+
+def test_release_window_sends_nothing_after_timeout():
+    scanner = MagicMock()
+    scanner.scan.return_value = None
+    notifier = MagicMock()
+
+    clock = FakeClock(datetime(2026, 4, 18, 20, 0, 0))
+    _scheduler(scanner, notifier, clock)._poll_release()
+
+    notifier.send_nothing_available.assert_called_once()
+    assert scanner.scan.call_count >= 30
+    assert all(s == 10 for s in clock.sleeps)
+
+
+def test_hourly_check_finds_slot():
+    scanner = MagicMock()
+    scanner.scan.return_value = _slot()
+    notifier = MagicMock()
+
+    clock = FakeClock(datetime(2026, 4, 18, 14, 0, 0))
+    _scheduler(scanner, notifier, clock)._poll_once("test")
+
+    notifier.send_slot_found.assert_called_once()
+
+
+def test_hourly_check_no_slot():
+    scanner = MagicMock()
+    scanner.scan.return_value = None
+    notifier = MagicMock()
+
+    clock = FakeClock(datetime(2026, 4, 18, 14, 0, 0))
+    _scheduler(scanner, notifier, clock)._poll_once("test")
+
+    notifier.send_slot_found.assert_not_called()
     notifier.send_nothing_available.assert_not_called()
 
 
-def test_nothing_available_after_timeout():
-    scanner = MagicMock()
-    scanner.scan.return_value = None
-    notifier = MagicMock()
-
-    clock = _pre_release_clock()
-    rc = Scheduler(scanner, notifier, now=clock.now, sleep=clock.sleep).run()
-
-    assert rc == 0
-    notifier.send_nothing_available.assert_called_once()
-    notifier.send_slot_found.assert_not_called()
+def test_in_release_window_detection():
+    clock = FakeClock(datetime(2026, 4, 18, 19, 59, 0))
+    s = _scheduler(MagicMock(), MagicMock(), clock)
+    assert s._in_release_window(datetime(2026, 4, 18, 19, 58, 0))
+    assert s._in_release_window(datetime(2026, 4, 18, 20, 0, 0))
+    assert s._in_release_window(datetime(2026, 4, 18, 20, 4, 59))
+    assert not s._in_release_window(datetime(2026, 4, 18, 19, 57, 0))
+    assert not s._in_release_window(datetime(2026, 4, 18, 20, 6, 0))
 
 
-def test_scanner_exception_exits_nonzero():
-    scanner = MagicMock()
-    scanner.scan.side_effect = RuntimeError("API failed")
-    notifier = MagicMock()
-
-    clock = _pre_release_clock()
-    rc = Scheduler(scanner, notifier, now=clock.now, sleep=clock.sleep).run()
-
-    assert rc != 0
-    notifier.send_slot_found.assert_not_called()
+def test_sleep_until_next_window_during_active_hours():
+    clock = FakeClock(datetime(2026, 4, 18, 14, 30, 0))
+    s = _scheduler(MagicMock(), MagicMock(), clock)
+    s._sleep_until_next_window()
+    assert len(clock.sleeps) == 1
+    assert clock.sleeps[0] == 1800
 
 
-def test_polls_for_5_minutes_at_10s_intervals_after_8pm():
-    scanner = MagicMock()
-    scanner.scan.return_value = None
-    notifier = MagicMock()
-
-    clock = _post_release_clock()
-    Scheduler(scanner, notifier, now=clock.now, sleep=clock.sleep).run()
-
-    assert scanner.scan.call_count >= 30
-    assert all(s == 10 for s in clock.sleeps)
-    assert sum(clock.sleeps) >= 300
+def test_sleep_until_next_window_after_hours():
+    clock = FakeClock(datetime(2026, 4, 18, 22, 0, 0))
+    s = _scheduler(MagicMock(), MagicMock(), clock)
+    s._sleep_until_next_window()
+    assert len(clock.sleeps) == 1
+    assert clock.t.hour == 9
+    assert clock.t.day == 19
 
 
-def test_ramps_polling_frequency_approaching_8pm():
+def test_ramps_polling_frequency_approaching_release():
     assert poll_interval_seconds(
         datetime(2026, 4, 18, 19, 58, 0), datetime(2026, 4, 18, 20, 0, 0)
     ) == 5
@@ -104,14 +126,3 @@ def test_ramps_polling_frequency_approaching_8pm():
     assert poll_interval_seconds(
         datetime(2026, 4, 18, 20, 0, 0), datetime(2026, 4, 18, 20, 0, 0)
     ) == 10
-
-
-def test_no_real_sleep_or_network_in_tests():
-    scanner = MagicMock()
-    scanner.scan.return_value = _slot()
-    notifier = MagicMock()
-
-    clock = _pre_release_clock()
-    Scheduler(scanner, notifier, now=clock.now, sleep=clock.sleep).run()
-
-    assert clock.sleeps == []

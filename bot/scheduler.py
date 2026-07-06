@@ -12,11 +12,11 @@ from bot.scanner import CourtScanner, Slot, build_priorities, make_api_probe
 
 
 RETRY_WINDOW = timedelta(minutes=5)
+HOURLY_START = 9
+HOURLY_END = 21
 
 
 class Scheduler:
-    """Orchestrates the polling lifecycle around the 8pm slot release."""
-
     def __init__(
         self,
         scanner: CourtScanner,
@@ -34,46 +34,104 @@ class Scheduler:
         self._now = now
         self._sleep = sleep
 
-    def run(self) -> int:
-        try:
-            slot = self._poll_until_found_or_timeout()
-            if slot is None:
-                log.info("No slots found after retry window")
-                self._notifier.send_nothing_available()
-                return 0
+    def run_forever(self) -> None:
+        log.info(
+            "Bot started — release polling at %d:00, "
+            "hourly checks %d:00-%d:00",
+            self._release_hour, HOURLY_START, HOURLY_END,
+        )
+        while True:
+            try:
+                self._run_day()
+            except Exception:
+                log.exception("Error during daily run")
+            self._sleep_until_next_window()
 
-            log.info("Slot found: %s %s %s", slot.court_name, slot.day, slot.time)
-            self._notifier.send_slot_found(
-                SlotFound(
-                    court_name=slot.court_name,
-                    day=slot.day,
-                    time=slot.time,
-                    duration_hours=self._duration_hours,
-                    basket_url=slot.booking_url,
-                )
-            )
-            return 0
-        except Exception:
-            traceback.print_exc()
-            return 1
+    def _run_day(self) -> None:
+        now = self._now()
+        hour = now.hour
 
-    def _poll_until_found_or_timeout(self) -> Slot | None:
-        release_at = _today_release_time(self._now(), self._release_hour)
+        if self._in_release_window(now):
+            self._poll_release()
+        elif HOURLY_START <= hour < HOURLY_END:
+            self._poll_once("hourly check")
+        else:
+            log.info("Outside active hours (%d:00-%d:00), sleeping", HOURLY_START, HOURLY_END)
+
+    def _poll_release(self) -> None:
+        release_at = self._now().replace(
+            hour=self._release_hour, minute=0, second=0, microsecond=0,
+        )
         deadline = release_at + RETRY_WINDOW
 
-        log.info("Polling until %s (release %s + %s)", deadline, release_at, RETRY_WINDOW)
+        log.info("Release window — polling until %s", deadline.strftime("%H:%M:%S"))
         poll_count = 0
         while True:
             poll_count += 1
             slot = self._scanner.scan()
             if slot is not None:
-                return slot
+                self._notify_slot(slot)
+                return
             if self._now() >= deadline:
-                log.info("Deadline reached after %d polls", poll_count)
-                return None
+                log.info("Release window ended after %d polls, no slots", poll_count)
+                self._notifier.send_nothing_available()
+                return
             interval = poll_interval_seconds(self._now(), release_at)
-            log.info("Poll %d complete, sleeping %ss", poll_count, interval)
+            log.info("Poll %d, sleeping %ss", poll_count, interval)
             self._sleep(interval)
+
+    def _poll_once(self, label: str) -> None:
+        log.info("Running %s", label)
+        slot = self._scanner.scan()
+        if slot is not None:
+            self._notify_slot(slot)
+        else:
+            log.info("No slots found")
+
+    def _notify_slot(self, slot: Slot) -> None:
+        log.info("Slot found: %s %s %s", slot.court_name, slot.day, slot.time)
+        self._notifier.send_slot_found(
+            SlotFound(
+                court_name=slot.court_name,
+                day=slot.day,
+                time=slot.time,
+                duration_hours=self._duration_hours,
+                basket_url=slot.booking_url,
+            )
+        )
+
+    def _in_release_window(self, now: datetime) -> bool:
+        release_at = now.replace(
+            hour=self._release_hour, minute=0, second=0, microsecond=0,
+        )
+        window_start = release_at - timedelta(minutes=2)
+        window_end = release_at + RETRY_WINDOW
+        return window_start <= now <= window_end
+
+    def _sleep_until_next_window(self) -> None:
+        now = self._now()
+        hour = now.hour
+
+        if self._in_release_window(now):
+            return
+
+        if HOURLY_START <= hour < HOURLY_END:
+            next_check = (now + timedelta(hours=1)).replace(
+                minute=0, second=0, microsecond=0,
+            )
+        elif hour < HOURLY_START:
+            next_check = now.replace(
+                hour=HOURLY_START, minute=0, second=0, microsecond=0,
+            )
+        else:
+            tomorrow = now + timedelta(days=1)
+            next_check = tomorrow.replace(
+                hour=HOURLY_START, minute=0, second=0, microsecond=0,
+            )
+
+        wait = (next_check - now).total_seconds()
+        log.info("Next check at %s (in %dm)", next_check.strftime("%H:%M"), int(wait / 60))
+        self._sleep(wait)
 
 
 def poll_interval_seconds(now: datetime, release_at: datetime) -> float:
@@ -82,10 +140,6 @@ def poll_interval_seconds(now: datetime, release_at: datetime) -> float:
     if now >= release_at - timedelta(seconds=30):
         return 1
     return 5
-
-
-def _today_release_time(now: datetime, release_hour: int = 20) -> datetime:
-    return now.replace(hour=release_hour, minute=0, second=0, microsecond=0)
 
 
 def main() -> int:
@@ -117,12 +171,14 @@ def main() -> int:
         priorities=priorities,
     )
 
-    return Scheduler(
+    Scheduler(
         scanner,
         notifier,
         duration_hours=config.slot_duration_hours,
         release_hour=config.release_hour,
-    ).run()
+    ).run_forever()
+
+    return 0
 
 
 if __name__ == "__main__":
