@@ -3,15 +3,9 @@ import traceback
 from datetime import datetime, timedelta
 from typing import Callable
 
-from bot.basket import BasketManager
 from bot.config import load_config
 from bot.notifier import Notifier, NtfyNotifier, SlotFound
-from bot.scanner import CourtScanner, Slot, build_priorities, make_playwright_probe
-from bot.session import (
-    SessionManager,
-    clubspark_login,
-    playwright_browser_factory,
-)
+from bot.scanner import CourtScanner, Slot, build_priorities, make_api_probe
 
 
 RETRY_WINDOW = timedelta(minutes=5)
@@ -23,8 +17,7 @@ class Scheduler:
     def __init__(
         self,
         scanner: CourtScanner,
-        basket: BasketManager,
-        notifier: Notifier,
+        notifier,
         *,
         duration_hours: int = 1,
         release_hour: int = 20,
@@ -32,7 +25,6 @@ class Scheduler:
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._scanner = scanner
-        self._basket = basket
         self._notifier = notifier
         self._duration_hours = duration_hours
         self._release_hour = release_hour
@@ -46,14 +38,13 @@ class Scheduler:
                 self._notifier.send_nothing_available()
                 return 0
 
-            basket_url = self._basket.add_to_basket(slot.booking_url)
             self._notifier.send_slot_found(
                 SlotFound(
                     court_name=slot.court_name,
                     day=slot.day,
                     time=slot.time,
                     duration_hours=self._duration_hours,
-                    basket_url=basket_url,
+                    basket_url=slot.booking_url,
                 )
             )
             return 0
@@ -87,8 +78,6 @@ def _today_release_time(now: datetime, release_hour: int = 20) -> datetime:
 
 
 def main() -> int:
-    from playwright.sync_api import sync_playwright  # noqa: import-outside-toplevel
-
     config = load_config()
     priorities = build_priorities(config.booking_days, config.preferred_times)
 
@@ -104,31 +93,20 @@ def main() -> int:
             recipients=config.sms_recipients,
         )
 
-    try:
-        with sync_playwright() as p:
-            factory = playwright_browser_factory(p, headless=True)
-            session_manager = SessionManager(
-                config=config,
-                browser_factory=factory,
-                login_flow=clubspark_login,
-            )
-            session = session_manager.launch()
+    scanner = CourtScanner(
+        availability_probe=make_api_probe(
+            duration_minutes=config.slot_duration_hours * 60,
+        ),
+        courts=config.courts,
+        priorities=priorities,
+    )
 
-            scanner = CourtScanner(
-                availability_probe=make_playwright_probe(session.page),
-                courts=config.courts,
-                priorities=priorities,
-            )
-            basket = BasketManager(session.page, duration_minutes=config.slot_duration_hours * 60)
-
-            return Scheduler(
-                scanner, basket, notifier,
-                duration_hours=config.slot_duration_hours,
-                release_hour=config.release_hour,
-            ).run()
-    except Exception:
-        traceback.print_exc()
-        return 1
+    return Scheduler(
+        scanner,
+        notifier,
+        duration_hours=config.slot_duration_hours,
+        release_hour=config.release_hour,
+    ).run()
 
 
 if __name__ == "__main__":

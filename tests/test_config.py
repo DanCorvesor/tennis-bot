@@ -18,7 +18,6 @@ COURTS=https://clubspark.lta.org.uk/SouthwarkPark,https://clubspark.lta.org.uk/B
 PREFERRED_TIMES=10:00,11:00,09:00
 BOOKING_DAYS=Saturday,Sunday
 SLOT_DURATION_HOURS=1
-SESSION_STATE_PATH=.state/session.json
 """.strip()
 
 VALID_NTFY_ENV = """
@@ -103,27 +102,6 @@ def test_slot_duration_hours_is_int(env_file: Path):
     cfg = load_config(env_file)
     assert cfg.slot_duration_hours == 1
     assert isinstance(cfg.slot_duration_hours, int)
-
-
-def test_card_fields_default_to_none(env_file: Path):
-    cfg = load_config(env_file)
-    assert cfg.card_number is None
-    assert cfg.card_expiry is None
-    assert cfg.card_cvv is None
-    assert cfg.card_name is None
-
-
-def test_card_fields_loaded_when_present(tmp_path: Path):
-    env = tmp_path / ".env"
-    env.write_text(
-        VALID_ENV
-        + "\nCARD_NUMBER=4111111111111111\nCARD_EXPIRY=12/30\nCARD_CVV=123\nCARD_NAME=Dan Corvesor\n"
-    )
-    cfg = load_config(env)
-    assert cfg.card_number == "4111111111111111"
-    assert cfg.card_expiry == "12/30"
-    assert cfg.card_cvv == "123"
-    assert cfg.card_name == "Dan Corvesor"
 
 
 @pytest.mark.parametrize("missing", REQUIRED_FIELDS)

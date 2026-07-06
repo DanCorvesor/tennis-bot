@@ -15,16 +15,11 @@ class Config:
     booking_days: list[str]
     slot_duration_hours: int
     release_hour: int
-    session_state_path: Path
     ntfy_topic: str | None = None
     twilio_account_sid: str | None = None
     twilio_auth_token: str | None = None
     twilio_from: str | None = None
     sms_recipients: list[tuple[str, str]] | None = None
-    card_number: str | None = None
-    card_expiry: str | None = None
-    card_cvv: str | None = None
-    card_name: str | None = None
 
 
 class ConfigError(ValueError):
@@ -98,16 +93,14 @@ def load_config(env_path: str | Path | None = None) -> Config:
         ) from exc
 
     release_hour = int(values.get("RELEASE_HOUR") or "20")
-    session_state = values.get("SESSION_STATE_PATH") or ".state/session.json"
-
     sms_raw = values.get("SMS_RECIPIENTS")
 
     return Config(
         lta_username=values["LTA_USERNAME"],
         lta_password=values["LTA_PASSWORD"],
         clubspark_email=values["CLUBSPARK_EMAIL"],
-        release_hour=release_hour,
         notify_method=notify_method,
+        release_hour=release_hour,
         ntfy_topic=values.get("NTFY_TOPIC") or None,
         twilio_account_sid=values.get("TWILIO_ACCOUNT_SID") or None,
         twilio_auth_token=values.get("TWILIO_AUTH_TOKEN") or None,
@@ -117,9 +110,4 @@ def load_config(env_path: str | Path | None = None) -> Config:
         preferred_times=_split(values["PREFERRED_TIMES"]),
         booking_days=_split(values["BOOKING_DAYS"]),
         slot_duration_hours=slot_hours,
-        session_state_path=Path(session_state),
-        card_number=values.get("CARD_NUMBER") or None,
-        card_expiry=values.get("CARD_EXPIRY") or None,
-        card_cvv=values.get("CARD_CVV") or None,
-        card_name=values.get("CARD_NAME") or None,
     )

@@ -63,10 +63,7 @@ def playwright_browser_factory(playwright, headless: bool = True) -> BrowserFact
     def factory(storage_state: Path | None) -> BrowserSession:
         browser = playwright.chromium.launch(
             headless=headless,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-            ],
+            args=["--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage"],
         )
         context = browser.new_context(
             storage_state=str(storage_state) if storage_state else None,

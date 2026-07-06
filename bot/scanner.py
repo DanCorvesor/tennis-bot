@@ -1,4 +1,6 @@
+import json
 import re
+import subprocess
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Callable
@@ -7,13 +9,13 @@ from typing import Callable
 @dataclass(frozen=True)
 class Slot:
     court_name: str
-    court_url: str
+    venue_slug: str
     day: str
     time: str
     booking_url: str
 
 
-AvailabilityProbe = Callable[[str, str, str], str | None]
+AvailabilityProbe = Callable[[str, str, str], Slot | None]
 
 
 class CourtScanner:
@@ -32,15 +34,9 @@ class CourtScanner:
     def scan(self) -> Slot | None:
         for day, time in self._priorities:
             for court_url in self._courts:
-                booking_url = self._probe(court_url, day, time)
-                if booking_url:
-                    return Slot(
-                        court_name=court_name_from_url(court_url),
-                        court_url=court_url,
-                        day=day,
-                        time=time,
-                        booking_url=booking_url,
-                    )
+                slot = self._probe(court_url, day, time)
+                if slot:
+                    return slot
         return None
 
 
@@ -53,39 +49,98 @@ def court_name_from_url(url: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", " ", slug)
 
 
+def _venue_slug(court_url: str) -> str:
+    return court_url.rstrip("/").rsplit("/", 1)[-1]
+
+
 def _time_to_minutes(time: str) -> int:
     hours, mins = time.split(":")
     return int(hours) * 60 + int(mins)
 
 
-def make_playwright_probe(page, today: date | None = None):
+def _build_booking_url(
+    venue_slug: str,
+    resource_id: str,
+    resource_group_id: str,
+    session_id: str,
+    date_str: str,
+    start_time: int,
+    end_time: int,
+    category: int,
+    sub_category: int,
+) -> str:
+    from urllib.parse import urlencode
+
+    params = {
+        "Contacts[0].IsPrimary": "true",
+        "Contacts[0].IsJunior": "false",
+        "Contacts[0].IsPlayer": "true",
+        "ResourceID": resource_id,
+        "Date": date_str,
+        "SessionID": session_id,
+        "StartTime": start_time,
+        "EndTime": end_time,
+        "Category": category,
+        "SubCategory": sub_category,
+        "VenueID": resource_group_id,
+        "ResourceGroupID": resource_group_id,
+    }
+    base = f"https://clubspark.lta.org.uk/{venue_slug}/Booking/Book"
+    return f"{base}?{urlencode(params)}"
+
+
+def make_api_probe(duration_minutes: int = 60, today: date | None = None):
     ref = today or date.today()
+    cache: dict[tuple[str, str], dict] = {}
 
-    last_url = [None]
-
-    def probe(court_url: str, day: str, time: str) -> str | None:
+    def probe(court_url: str, day: str, time: str) -> Slot | None:
+        slug = _venue_slug(court_url)
         target = _next_weekday(ref, day)
-        base = f"{court_url.rstrip('/')}/Booking/BookByDate"
-        url = f"{base}#?date={target.isoformat()}&role=member"
+        date_str = target.isoformat()
 
-        if url != last_url[0]:
-            current_base = page.url.split("#")[0]
-            if current_base != base:
-                page.goto(url)
-                page.locator(".time-slot").first.wait_for(timeout=30_000)
-            page.evaluate(
-                f"window.location.hash = '?date={target.isoformat()}&role=member'"
+        cache_key = (slug, date_str)
+        if cache_key not in cache:
+            api_url = (
+                f"https://clubspark.lta.org.uk/v0/VenueBooking/{slug}"
+                f"/GetVenueSessions?resourceID=&startDate={date_str}"
+                f"&endDate={date_str}&roleId="
             )
-            page.wait_for_timeout(3000)
-            last_url[0] = url
+            result = subprocess.run(
+                ["curl", "-s", "--fail", api_url],
+                capture_output=True, timeout=30, check=True,
+            )
+            cache[cache_key] = json.loads(result.stdout)
 
-        minutes = _time_to_minutes(time)
-        slot_link = page.locator(
-            f'a.book-interval.not-booked[data-test-id$="|{minutes}"]'
-        ).first
-        if slot_link.count() == 0:
-            return None
-        return slot_link.get_attribute("data-test-id")
+        data = cache[cache_key]
+        rg_id = data["ResourceGroups"][0]["ID"]
+        start_minutes = _time_to_minutes(time)
+        end_minutes = start_minutes + duration_minutes
+
+        for resource in data["Resources"]:
+            for session in resource["Days"][0]["Sessions"]:
+                if (
+                    session["Category"] == 0
+                    and "Cost" in session
+                    and session["StartTime"] == start_minutes
+                ):
+                    return Slot(
+                        court_name=court_name_from_url(court_url),
+                        venue_slug=slug,
+                        day=day,
+                        time=time,
+                        booking_url=_build_booking_url(
+                            venue_slug=slug,
+                            resource_id=resource["ID"],
+                            resource_group_id=rg_id,
+                            session_id=session["ID"],
+                            date_str=date_str,
+                            start_time=start_minutes,
+                            end_time=end_minutes,
+                            category=session["Category"],
+                            sub_category=session["SubCategory"],
+                        ),
+                    )
+        return None
 
     return probe
 
