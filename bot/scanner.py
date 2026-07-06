@@ -1,9 +1,12 @@
 import json
+import logging
 import re
 import subprocess
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Callable
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -105,6 +108,7 @@ def make_api_probe(duration_minutes: int = 60, today: date | None = None):
                 f"/GetVenueSessions?resourceID=&startDate={date_str}"
                 f"&endDate={date_str}&roleId="
             )
+            log.info("Fetching %s %s", court_name_from_url(court_url), date_str)
             result = subprocess.run(
                 ["curl", "-s", "--fail", api_url],
                 capture_output=True, timeout=30, check=True,
@@ -115,6 +119,7 @@ def make_api_probe(duration_minutes: int = 60, today: date | None = None):
         rg_id = data["ResourceGroups"][0]["ID"]
         start_minutes = _time_to_minutes(time)
         end_minutes = start_minutes + duration_minutes
+        name = court_name_from_url(court_url)
 
         for resource in data["Resources"]:
             for session in resource["Days"][0]["Sessions"]:
@@ -123,8 +128,12 @@ def make_api_probe(duration_minutes: int = 60, today: date | None = None):
                     and "Cost" in session
                     and session["StartTime"] == start_minutes
                 ):
+                    log.info(
+                        "AVAILABLE: %s %s %s %s on %s",
+                        name, resource["Name"], day, time, date_str,
+                    )
                     return Slot(
-                        court_name=court_name_from_url(court_url),
+                        court_name=name,
                         venue_slug=slug,
                         day=day,
                         time=time,
@@ -140,6 +149,8 @@ def make_api_probe(duration_minutes: int = 60, today: date | None = None):
                             sub_category=session["SubCategory"],
                         ),
                     )
+
+        log.info("No slot: %s %s %s", name, day, time)
         return None
 
     return probe

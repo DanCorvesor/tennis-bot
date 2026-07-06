@@ -1,7 +1,10 @@
+import logging
 import time
 import traceback
 from datetime import datetime, timedelta
 from typing import Callable
+
+log = logging.getLogger(__name__)
 
 from bot.config import load_config
 from bot.notifier import Notifier, NtfyNotifier, SlotFound
@@ -35,9 +38,11 @@ class Scheduler:
         try:
             slot = self._poll_until_found_or_timeout()
             if slot is None:
+                log.info("No slots found after retry window")
                 self._notifier.send_nothing_available()
                 return 0
 
+            log.info("Slot found: %s %s %s", slot.court_name, slot.day, slot.time)
             self._notifier.send_slot_found(
                 SlotFound(
                     court_name=slot.court_name,
@@ -56,13 +61,19 @@ class Scheduler:
         release_at = _today_release_time(self._now(), self._release_hour)
         deadline = release_at + RETRY_WINDOW
 
+        log.info("Polling until %s (release %s + %s)", deadline, release_at, RETRY_WINDOW)
+        poll_count = 0
         while True:
+            poll_count += 1
             slot = self._scanner.scan()
             if slot is not None:
                 return slot
             if self._now() >= deadline:
+                log.info("Deadline reached after %d polls", poll_count)
                 return None
-            self._sleep(poll_interval_seconds(self._now(), release_at))
+            interval = poll_interval_seconds(self._now(), release_at)
+            log.info("Poll %d complete, sleeping %ss", poll_count, interval)
+            self._sleep(interval)
 
 
 def poll_interval_seconds(now: datetime, release_at: datetime) -> float:
@@ -78,6 +89,11 @@ def _today_release_time(now: datetime, release_hour: int = 20) -> datetime:
 
 
 def main() -> int:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
     config = load_config()
     priorities = build_priorities(config.booking_days, config.preferred_times)
 
