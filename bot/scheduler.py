@@ -8,7 +8,7 @@ log = logging.getLogger(__name__)
 
 from bot.config import load_config
 from bot.notifier import Notifier, NtfyNotifier, SlotFound
-from bot.scanner import CourtScanner, Slot, build_priorities, make_api_probe
+from bot.scanner import CourtScanner, Slot, build_priorities, make_playwright_probe
 
 
 RETRY_WINDOW = timedelta(minutes=5)
@@ -163,20 +163,43 @@ def main() -> int:
             recipients=config.sms_recipients,
         )
 
-    scanner = CourtScanner(
-        availability_probe=make_api_probe(
-            duration_minutes=config.slot_duration_hours * 60,
-        ),
-        courts=config.courts,
-        priorities=priorities,
-    )
+    from playwright.sync_api import sync_playwright
 
-    Scheduler(
-        scanner,
-        notifier,
-        duration_hours=config.slot_duration_hours,
-        release_hour=config.release_hour,
-    ).run_forever()
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(
+            headless=False,
+            args=[
+                "--headless=new",
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+            ],
+        )
+        ctx = browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+            ),
+        )
+        page = ctx.new_page()
+        page.add_init_script(
+            'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
+        )
+
+        scanner = CourtScanner(
+            availability_probe=make_playwright_probe(
+                page,
+                duration_minutes=config.slot_duration_hours * 60,
+            ),
+            courts=config.courts,
+            priorities=priorities,
+        )
+
+        Scheduler(
+            scanner,
+            notifier,
+            duration_hours=config.slot_duration_hours,
+            release_hour=config.release_hour,
+        ).run_forever()
 
     return 0
 

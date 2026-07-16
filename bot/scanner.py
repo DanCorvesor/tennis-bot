@@ -1,4 +1,3 @@
-import json
 import logging
 import re
 from dataclasses import dataclass
@@ -69,145 +68,65 @@ def _time_to_minutes(time: str) -> int:
     return int(hours) * 60 + int(mins)
 
 
-def _build_booking_url(
-    venue_slug: str,
-    resource_id: str,
-    resource_group_id: str,
-    session_id: str,
-    date_str: str,
-    start_time: int,
-    end_time: int,
-    category: int,
-    sub_category: int,
-) -> str:
-    from urllib.parse import urlencode
-
-    params = {
-        "Contacts[0].IsPrimary": "true",
-        "Contacts[0].IsJunior": "false",
-        "Contacts[0].IsPlayer": "true",
-        "ResourceID": resource_id,
-        "Date": date_str,
-        "SessionID": session_id,
-        "StartTime": start_time,
-        "EndTime": end_time,
-        "Category": category,
-        "SubCategory": sub_category,
-        "VenueID": resource_group_id,
-        "ResourceGroupID": resource_group_id,
-    }
-    base = f"https://clubspark.lta.org.uk/{venue_slug}/Booking/Book"
-    return f"{base}?{urlencode(params)}"
-
-
-def make_api_probe(duration_minutes: int = 60, today: date | None = None):
+def make_playwright_probe(page, duration_minutes: int = 60, today: date | None = None):
     _fixed_today = today
-    cache: dict[tuple[str, str], dict] = {}
-    _page = [None]
-
-    def _get_page():
-        if _page[0] is not None:
-            try:
-                if not _page[0].is_closed():
-                    return _page[0]
-            except Exception:
-                pass
-
-        from playwright.sync_api import sync_playwright
-        pw = sync_playwright().start()
-        browser = pw.chromium.launch(
-            headless=False,
-            args=[
-                "--headless=new",
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-            ],
-        )
-        ctx = browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
-            ),
-        )
-        page = ctx.new_page()
-        page.add_init_script(
-            'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-        )
-        _page[0] = page
-        return page
-
-    def _fetch_json(page, url: str) -> dict | None:
-        page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_function(
-            "document.title !== 'Just a moment...'", timeout=30000,
-        )
-        body = page.inner_text("body")
-        return json.loads(body)
+    _last_page_key = [None]
 
     def clear_cache() -> None:
-        cache.clear()
+        _last_page_key[0] = None
 
     def probe(court_url: str, day: str, time: str) -> Slot | None:
         slug = _venue_slug(court_url)
         ref = _fixed_today or date.today()
         target = _next_weekday(ref, day)
         date_str = target.isoformat()
-
-        cache_key = (slug, date_str)
-        if cache_key not in cache:
-            api_url = (
-                f"https://clubspark.lta.org.uk/v0/VenueBooking/{slug}"
-                f"/GetVenueSessions?resourceID=&startDate={date_str}"
-                f"&endDate={date_str}&roleId="
-            )
-            log.info("Fetching %s %s", court_name_from_url(court_url), date_str)
-            try:
-                page = _get_page()
-                data = _fetch_json(page, api_url)
-                if data is None:
-                    return None
-                cache[cache_key] = data
-            except Exception as exc:
-                log.warning("API request failed for %s %s: %s", slug, date_str, exc)
-                return None
-
-        data = cache[cache_key]
-        rg_id = data["ResourceGroups"][0]["ID"]
-        start_minutes = _time_to_minutes(time)
-        end_minutes = start_minutes + duration_minutes
         name = court_name_from_url(court_url)
 
-        for resource in data["Resources"]:
-            for session in resource["Days"][0]["Sessions"]:
-                if (
-                    session["Category"] == 0
-                    and "Cost" in session
-                    and session["StartTime"] == start_minutes
-                ):
-                    log.info(
-                        "AVAILABLE: %s %s %s %s on %s",
-                        name, resource["Name"], day, time, date_str,
+        page_key = (slug, date_str)
+        if page_key != _last_page_key[0]:
+            base = f"{court_url.rstrip('/')}/Booking/BookByDate"
+            full_url = f"{base}#?date={date_str}&role=member"
+            log.info("Fetching %s %s", name, date_str)
+            try:
+                current_base = page.url.split("#")[0]
+                if current_base != base:
+                    page.goto(full_url, wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_function(
+                        "document.title !== 'Just a moment...'", timeout=30000,
                     )
-                    return Slot(
-                        court_name=name,
-                        venue_slug=slug,
-                        day=day,
-                        time=time,
-                        booking_url=_build_booking_url(
-                            venue_slug=slug,
-                            resource_id=resource["ID"],
-                            resource_group_id=rg_id,
-                            session_id=session["ID"],
-                            date_str=date_str,
-                            start_time=start_minutes,
-                            end_time=end_minutes,
-                            category=session["Category"],
-                            sub_category=session["SubCategory"],
-                        ),
+                    page.locator(".time-slot").first.wait_for(timeout=30000)
+                else:
+                    page.evaluate(
+                        f"window.location.hash = '?date={date_str}&role=member'"
                     )
+                    page.wait_for_timeout(3000)
+                _last_page_key[0] = page_key
+            except Exception as exc:
+                log.warning("Failed to load %s %s: %s", name, date_str, exc)
+                _last_page_key[0] = None
+                return None
 
-        log.info("No slot: %s %s %s", name, day, time)
-        return None
+        minutes = _time_to_minutes(time)
+        slot_link = page.locator(
+            f'a.book-interval.not-booked[data-test-id$="|{minutes}"]'
+        ).first
+
+        if slot_link.count() == 0:
+            log.info("No slot: %s %s %s", name, day, time)
+            return None
+
+        log.info("AVAILABLE: %s %s %s on %s", name, day, time, date_str)
+        booking_page = (
+            f"https://clubspark.lta.org.uk/{slug}/Booking/BookByDate"
+            f"#?date={date_str}&role=member"
+        )
+        return Slot(
+            court_name=name,
+            venue_slug=slug,
+            day=day,
+            time=time,
+            booking_url=booking_page,
+        )
 
     probe.clear_cache = clear_cache
     return probe
