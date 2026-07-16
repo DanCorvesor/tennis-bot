@@ -13,7 +13,7 @@ from bot.scanner import CourtScanner, Slot, build_priorities, make_api_probe
 
 RETRY_WINDOW = timedelta(minutes=5)
 HOURLY_START = 9
-HOURLY_END = 21
+HOURLY_END = 22
 
 
 class Scheduler:
