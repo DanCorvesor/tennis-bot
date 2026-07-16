@@ -149,7 +149,7 @@ def main() -> int:
         datefmt="%H:%M:%S",
     )
     config = load_config()
-    priorities = build_priorities(config.booking_days, config.preferred_times)
+    priorities = build_priorities(config.schedule)
 
     if config.notify_method == "ntfy":
         notifier = NtfyNotifier(config.ntfy_topic)

@@ -11,8 +11,7 @@ class Config:
     clubspark_email: str
     notify_method: str
     courts: list[str]
-    preferred_times: list[str]
-    booking_days: list[str]
+    schedule: list[tuple[list[str], list[str]]]
     slot_duration_hours: int
     release_hour: int
     ntfy_topic: str | None = None
@@ -32,8 +31,6 @@ _REQUIRED = (
     "CLUBSPARK_EMAIL",
     "NOTIFY_METHOD",
     "COURTS",
-    "PREFERRED_TIMES",
-    "BOOKING_DAYS",
     "SLOT_DURATION_HOURS",
 )
 
@@ -55,6 +52,32 @@ def _parse_recipients(value: str) -> list[tuple[str, str]]:
         name, number = entry.split(":", 1)
         recipients.append((name.strip(), number.strip()))
     return recipients
+
+
+def _parse_schedule(value: str) -> list[tuple[list[str], list[str]]]:
+    """Parse BOOKING_SCHEDULE into groups of (days, times).
+
+    Format: "Days=times;Days=times;..."
+    Example: "Saturday,Sunday=10:00,11:00;Monday,Tuesday=18:00,19:00"
+    """
+    groups: list[tuple[list[str], list[str]]] = []
+    for group in value.split(";"):
+        group = group.strip()
+        if not group:
+            continue
+        if "=" not in group:
+            raise ConfigError(
+                f"BOOKING_SCHEDULE entries must be Days=times, got {group!r}"
+            )
+        days_part, times_part = group.split("=", 1)
+        days = _split(days_part)
+        times = _split(times_part)
+        if not days or not times:
+            raise ConfigError(
+                f"BOOKING_SCHEDULE entry has empty days or times: {group!r}"
+            )
+        groups.append((days, times))
+    return groups
 
 
 def load_config(env_path: str | Path | None = None) -> Config:
@@ -95,6 +118,15 @@ def load_config(env_path: str | Path | None = None) -> Config:
     release_hour = int(values.get("RELEASE_HOUR") or "20")
     sms_raw = values.get("SMS_RECIPIENTS")
 
+    if values.get("BOOKING_SCHEDULE"):
+        schedule = _parse_schedule(values["BOOKING_SCHEDULE"])
+    elif values.get("BOOKING_DAYS") and values.get("PREFERRED_TIMES"):
+        schedule = [(_split(values["BOOKING_DAYS"]), _split(values["PREFERRED_TIMES"]))]
+    else:
+        raise ConfigError(
+            "Set BOOKING_SCHEDULE or both BOOKING_DAYS and PREFERRED_TIMES"
+        )
+
     return Config(
         lta_username=values["LTA_USERNAME"],
         lta_password=values["LTA_PASSWORD"],
@@ -107,7 +139,6 @@ def load_config(env_path: str | Path | None = None) -> Config:
         twilio_from=values.get("TWILIO_FROM") or None,
         sms_recipients=_parse_recipients(sms_raw) if sms_raw else None,
         courts=_split(values["COURTS"]),
-        preferred_times=_split(values["PREFERRED_TIMES"]),
-        booking_days=_split(values["BOOKING_DAYS"]),
+        schedule=schedule,
         slot_duration_hours=slot_hours,
     )

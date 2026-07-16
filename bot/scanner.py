@@ -45,8 +45,15 @@ class CourtScanner:
         return None
 
 
-def build_priorities(days: list[str], times: list[str]) -> list[tuple[str, str]]:
-    return [(day, time) for time in times for day in days]
+def build_priorities(
+    schedule: list[tuple[list[str], list[str]]],
+) -> list[tuple[str, str]]:
+    priorities: list[tuple[str, str]] = []
+    for days, times in schedule:
+        for time in times:
+            for day in days:
+                priorities.append((day, time))
+    return priorities
 
 
 def court_name_from_url(url: str) -> str:
