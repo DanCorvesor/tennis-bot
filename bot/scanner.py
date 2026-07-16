@@ -106,30 +106,40 @@ def make_api_probe(duration_minutes: int = 60, today: date | None = None):
     _page = [None]
 
     def _get_page():
-        if _page[0] is None or _page[0].is_closed():
-            from playwright.sync_api import sync_playwright
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=False,
-                args=["--disable-blink-features=AutomationControlled", "--headless=new"],
-            )
-            ctx = browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
-                ),
-            )
-            page = ctx.new_page()
-            page.add_init_script(
-                'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-            )
-            _page[0] = page
-        return _page[0]
+        if _page[0] is not None:
+            try:
+                if not _page[0].is_closed():
+                    return _page[0]
+            except Exception:
+                pass
+
+        from playwright.sync_api import sync_playwright
+        pw = sync_playwright().start()
+        browser = pw.chromium.launch(
+            headless=False,
+            args=[
+                "--headless=new",
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+            ],
+        )
+        ctx = browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+            ),
+        )
+        page = ctx.new_page()
+        page.add_init_script(
+            'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
+        )
+        _page[0] = page
+        return page
 
     def _fetch_json(page, url: str) -> dict | None:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_function(
-            "document.title !== 'Just a moment...'", timeout=20000,
+            "document.title !== 'Just a moment...'", timeout=30000,
         )
         body = page.inner_text("body")
         return json.loads(body)
