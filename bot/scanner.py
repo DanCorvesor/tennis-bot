@@ -95,7 +95,7 @@ def _build_booking_url(
 
 
 def make_api_probe(duration_minutes: int = 60, today: date | None = None):
-    ref = today or date.today()
+    _fixed_today = today
     cache: dict[tuple[str, str], dict] = {}
 
     def clear_cache() -> None:
@@ -103,6 +103,7 @@ def make_api_probe(duration_minutes: int = 60, today: date | None = None):
 
     def probe(court_url: str, day: str, time: str) -> Slot | None:
         slug = _venue_slug(court_url)
+        ref = _fixed_today or date.today()
         target = _next_weekday(ref, day)
         date_str = target.isoformat()
 
@@ -114,10 +115,14 @@ def make_api_probe(duration_minutes: int = 60, today: date | None = None):
                 f"&endDate={date_str}&roleId="
             )
             log.info("Fetching %s %s", court_name_from_url(court_url), date_str)
-            result = subprocess.run(
-                ["curl", "-s", "--fail", api_url],
-                capture_output=True, timeout=30, check=True,
-            )
+            try:
+                result = subprocess.run(
+                    ["curl", "-s", "--fail", api_url],
+                    capture_output=True, timeout=30, check=True,
+                )
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+                log.warning("API request failed for %s %s: %s", slug, date_str, exc)
+                return None
             cache[cache_key] = json.loads(result.stdout)
 
         data = cache[cache_key]
