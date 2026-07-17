@@ -12,7 +12,7 @@ from bot.scanner import CourtScanner, Slot, build_priorities, make_playwright_pr
 
 
 RETRY_WINDOW = timedelta(minutes=5)
-HOURLY_START = 9
+HOURLY_START = 8
 HOURLY_END = 22
 
 
