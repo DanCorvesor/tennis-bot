@@ -166,24 +166,30 @@ def main() -> int:
             recipients=config.sms_recipients,
         )
 
+    import os
+
     from playwright.sync_api import sync_playwright
 
+    # Real Chrome (channel="chrome") clears Cloudflare where bundled Chromium
+    # cannot. A persistent profile keeps the cf_clearance cookie between runs.
+    channel = os.environ.get("BROWSER_CHANNEL", "chrome") or None
+    profile_dir = os.environ.get("BROWSER_PROFILE_DIR", "/app/.state/chrome-profile")
+
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(
+        ctx = pw.chromium.launch_persistent_context(
+            user_data_dir=profile_dir,
+            channel=channel,
             headless=False,
             args=[
                 "--headless=new",
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
             ],
+            viewport={"width": 1280, "height": 800},
+            locale="en-GB",
+            timezone_id="Europe/London",
         )
-        ctx = browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
-            ),
-        )
-        page = ctx.new_page()
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
         page.add_init_script(
             'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
         )
@@ -197,12 +203,15 @@ def main() -> int:
             priorities=priorities,
         )
 
-        Scheduler(
-            scanner,
-            notifier,
-            duration_hours=config.slot_duration_hours,
-            release_hour=config.release_hour,
-        ).run_forever()
+        try:
+            Scheduler(
+                scanner,
+                notifier,
+                duration_hours=config.slot_duration_hours,
+                release_hour=config.release_hour,
+            ).run_forever()
+        finally:
+            ctx.close()
 
     return 0
 
