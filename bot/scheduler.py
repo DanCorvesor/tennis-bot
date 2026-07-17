@@ -116,9 +116,12 @@ class Scheduler:
             return
 
         if HOURLY_START <= hour < HOURLY_END:
-            next_check = (now + timedelta(hours=1)).replace(
-                minute=0, second=0, microsecond=0,
-            )
+            if now.minute < 30:
+                next_check = now.replace(minute=30, second=0, microsecond=0)
+            else:
+                next_check = (now + timedelta(hours=1)).replace(
+                    minute=0, second=0, microsecond=0,
+                )
         elif hour < HOURLY_START:
             next_check = now.replace(
                 hour=HOURLY_START, minute=0, second=0, microsecond=0,
