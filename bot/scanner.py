@@ -94,6 +94,9 @@ def make_playwright_probe(page, duration_minutes: int = 60, today: date | None =
                     page.wait_for_function(
                         "document.title !== 'Just a moment...'", timeout=30000,
                     )
+                    accept_btn = page.get_by_role("button", name="Accept All")
+                    if accept_btn.is_visible():
+                        accept_btn.click()
                     page.locator(".time-slot").first.wait_for(timeout=30000)
                 else:
                     page.evaluate(
