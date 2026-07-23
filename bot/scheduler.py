@@ -176,15 +176,18 @@ def main() -> int:
     profile_dir = os.environ.get("BROWSER_PROFILE_DIR", "/app/.state/chrome-profile")
 
     with sync_playwright() as pw:
+        # True headful under Xvfb (see Dockerfile). Headful real Chrome is far
+        # less likely to be escalated to an interactive Cloudflare challenge
+        # than headless. Set HEADLESS=1 to force headless (e.g. local testing).
+        headless = os.environ.get("HEADLESS") == "1"
+        args = ["--disable-blink-features=AutomationControlled", "--no-sandbox"]
+        if headless:
+            args.insert(0, "--headless=new")
         ctx = pw.chromium.launch_persistent_context(
             user_data_dir=profile_dir,
             channel=channel,
-            headless=False,
-            args=[
-                "--headless=new",
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-            ],
+            headless=headless,
+            args=args,
             viewport={"width": 1280, "height": 800},
             locale="en-GB",
             timezone_id="Europe/London",

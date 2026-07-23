@@ -120,13 +120,32 @@ def make_playwright_probe(page, duration_minutes: int = 60, today: date | None =
     def clear_cache() -> None:
         cache.clear()
 
+    def _try_click_turnstile() -> None:
+        """Click the Cloudflare Turnstile checkbox if the interactive
+        challenge is shown (escalated from the passive managed challenge)."""
+        try:
+            frame = page.frame_locator(
+                'iframe[src*="challenges.cloudflare.com"]'
+            )
+            checkbox = frame.locator('input[type="checkbox"]')
+            checkbox.click(timeout=5000)
+        except Exception:
+            pass
+
     def _ensure_cloudflare_cleared(court_url: str, date_str: str) -> None:
         base = f"{court_url.rstrip('/')}/Booking/BookByDate"
         full_url = f"{base}#?date={date_str}&role=member"
         page.goto(full_url, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_function(
-            "document.title !== 'Just a moment...'", timeout=30000,
-        )
+        try:
+            page.wait_for_function(
+                "document.title !== 'Just a moment...'", timeout=25000,
+            )
+        except Exception:
+            # Interactive Turnstile — click the checkbox and wait longer
+            _try_click_turnstile()
+            page.wait_for_function(
+                "document.title !== 'Just a moment...'", timeout=45000,
+            )
         accept_btn = page.get_by_role("button", name="Accept All")
         if accept_btn.is_visible():
             accept_btn.click()

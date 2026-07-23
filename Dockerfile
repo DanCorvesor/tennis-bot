@@ -13,8 +13,15 @@ RUN uv sync --frozen --no-dev
 # Install real Google Chrome (channel "chrome") plus OS dependencies
 RUN uv run playwright install --with-deps chrome
 
+# Xvfb lets us run Chrome in true headful mode (headless is more likely to be
+# escalated to an interactive Cloudflare challenge).
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends xvfb && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY bot/ bot/
 
 ENV PYTHONUNBUFFERED=1
 
-ENTRYPOINT ["uv", "run", "python", "-m", "bot.scheduler"]
+ENTRYPOINT ["xvfb-run", "-a", "--server-args=-screen 0 1280x800x24", \
+            "uv", "run", "python", "-m", "bot.scheduler"]
