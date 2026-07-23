@@ -16,7 +16,7 @@ RUN uv run playwright install --with-deps chrome
 # Xvfb lets us run Chrome in true headful mode (headless is more likely to be
 # escalated to an interactive Cloudflare challenge).
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends xvfb && \
+    apt-get install -y --no-install-recommends xvfb xauth && \
     rm -rf /var/lib/apt/lists/*
 
 COPY bot/ bot/
