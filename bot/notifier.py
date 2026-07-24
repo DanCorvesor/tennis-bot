@@ -47,8 +47,8 @@ class Notifier:
         self._broadcast(body)
 
     def send_slots(self, slots: list[SlotFound]) -> None:
-        for day_label, lines in _group_by_day(slots):
-            body = f"Tennis slots {day_label}:\n" + "\n".join(lines)
+        for court_name, day_label, lines in _group_by_court_day(slots):
+            body = f"{court_name} — {day_label}:\n" + "\n".join(lines)
             self._broadcast(body)
 
     def send_nothing_available(self) -> None:
@@ -65,29 +65,40 @@ class Notifier:
             )
 
 
-def _group_by_day(slots: list[SlotFound]) -> list[tuple[str, list[str]]]:
-    """Group slots by day (preserving order), returning (day_label, lines)
-    where each line is 'Court TIME-RANGE: url'."""
-    groups: dict[str, list[str]] = {}
-    labels: dict[str, str] = {}
-    order: list[str] = []
+def _slugify(name: str) -> str:
+    return name.lower().replace(" ", "-")
+
+
+def _group_by_court_day(
+    slots: list[SlotFound],
+) -> list[tuple[str, str, list[str]]]:
+    """Group slots by (court, day), preserving order. Returns
+    (court_name, day_label, lines) where each line is 'TIME-RANGE: url'."""
+    groups: dict[tuple[str, str, str], list[str]] = {}
+    labels: dict[tuple[str, str, str], str] = {}
+    order: list[tuple[str, str, str]] = []
     for s in slots:
-        key = f"{s.day}|{s.date_str}"
+        key = (s.court_name, s.day, s.date_str)
         if key not in groups:
             groups[key] = []
             labels[key] = f"{s.day} ({s.date_str})" if s.date_str else s.day
             order.append(key)
         time_range = _format_time_range(s.time, s.duration_hours)
-        groups[key].append(f"{s.court_name} {time_range}: {s.basket_url}")
-    return [(labels[k], groups[k]) for k in order]
+        groups[key].append(f"{time_range}: {s.basket_url}")
+    return [(k[0], labels[k], groups[k]) for k in order]
 
 
 class NtfyNotifier:
     def __init__(self, topic_prefix: str) -> None:
         self._prefix = topic_prefix
 
-    def _publish(self, title: str, body: str, click: str | None = None) -> None:
-        url = f"https://ntfy.sh/{self._prefix}"
+    def _topic_for(self, court_name: str) -> str:
+        return f"{self._prefix}-{_slugify(court_name)}"
+
+    def _publish(
+        self, topic: str, title: str, body: str, click: str | None = None
+    ) -> None:
+        url = f"https://ntfy.sh/{topic}"
         req = Request(url, data=body.encode())
         req.add_header("Title", title)
         req.add_header("Priority", "high")
@@ -98,18 +109,20 @@ class NtfyNotifier:
         urlopen(req)
 
     def send_slot_found(self, slot: SlotFound) -> None:
-        # Single slot (release window): keep it simple.
+        # Single slot (release window): keep it simple, on the court's topic.
         time_range = _format_time_range(slot.time, slot.duration_hours)
         title = f"Tennis slot: {slot.court_name}, {slot.day} {time_range}"
         body = f"Time: {time_range}\nBooking link: {slot.basket_url}"
-        self._publish(title, body, click=slot.basket_url)
+        self._publish(
+            self._topic_for(slot.court_name), title, body, click=slot.basket_url
+        )
 
     def send_slots(self, slots: list[SlotFound]) -> None:
-        # One message per day, listing every available slot with its link.
-        for day_label, lines in _group_by_day(slots):
-            title = f"Tennis: {day_label} — {len(lines)} slot(s)"
+        # One message per court per day, on that court's topic.
+        for court_name, day_label, lines in _group_by_court_day(slots):
+            title = f"Tennis: {court_name} {day_label} — {len(lines)} slot(s)"
             body = "\n".join(lines)
-            self._publish(title, body)
+            self._publish(self._topic_for(court_name), title, body)
 
     def send_nothing_available(self) -> None:
         url = f"https://ntfy.sh/{self._prefix}"
