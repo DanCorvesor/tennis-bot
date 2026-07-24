@@ -11,9 +11,13 @@ nodriver is async; this wraps it in a persistent event loop so the rest of the
 """
 
 import asyncio
+import glob
 import json
 import logging
+import os
 import shutil
+import subprocess
+import time
 
 log = logging.getLogger(__name__)
 
@@ -42,14 +46,36 @@ class BrowserSession:
         return self._loop.run_until_complete(coro)
 
     def start(self) -> None:
-        try:
-            self._run(self._start())
-        except Exception as exc:  # noqa: BLE001
-            # A profile left by a different Chrome build (or a crash) can stop
-            # Chrome starting. Wipe it and retry once from a clean profile.
-            log.warning("Browser start failed (%s); wiping profile and retrying", exc)
-            shutil.rmtree(self._profile_dir, ignore_errors=True)
-            self._run(self._start())
+        # nodriver waits only ~2.75s for Chrome to open its debug port; on a
+        # loaded/slow host Chrome can take longer, so retry. A failed attempt
+        # may leave an orphaned Chrome holding the profile — kill it first.
+        attempts = 6
+        for attempt in range(attempts):
+            try:
+                self._run(self._start())
+                return
+            except Exception as exc:  # noqa: BLE001
+                msg = " ".join(str(exc).split())[:100]
+                log.warning(
+                    "Browser start attempt %d/%d failed: %s",
+                    attempt + 1, attempts, msg,
+                )
+                subprocess.run(
+                    ["pkill", "-9", "-f", "google-chrome"], check=False
+                )
+                if attempt == 0:
+                    # Profile from a different Chrome build can block startup.
+                    shutil.rmtree(self._profile_dir, ignore_errors=True)
+                else:
+                    # A killed Chrome can leave a lock that blocks the next launch.
+                    for lock in glob.glob(f"{self._profile_dir}/Singleton*"):
+                        try:
+                            os.remove(lock)
+                        except OSError:
+                            pass
+                if attempt < attempts - 1:
+                    time.sleep(3)
+        raise RuntimeError(f"Browser failed to start after {attempts} attempts")
 
     async def _start(self) -> None:
         import nodriver as uc

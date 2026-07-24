@@ -15,7 +15,7 @@ RUN uv sync --frozen --no-dev
 RUN apt-get update && \
     apt-get install -y --no-install-recommends wget gnupg ca-certificates && \
     wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && \
-    apt-get install -y --no-install-recommends /tmp/chrome.deb xvfb xauth && \
+    apt-get install -y --no-install-recommends /tmp/chrome.deb xvfb xauth procps && \
     rm -f /tmp/chrome.deb && \
     rm -rf /var/lib/apt/lists/*
 
