@@ -14,6 +14,7 @@ class Slot:
     day: str
     time: str
     booking_url: str
+    date_str: str = ""
 
 
 AvailabilityProbe = Callable[[str, str, str], Slot | None]
@@ -33,6 +34,8 @@ class CourtScanner:
         self._priorities = priorities
 
     def scan(self) -> Slot | None:
+        """Return the highest-priority available slot, stopping at the first
+        match (used at the release window to grab the best slot fast)."""
         if hasattr(self._probe, "clear_cache"):
             self._probe.clear_cache()
         for day, time in self._priorities:
@@ -41,6 +44,19 @@ class CourtScanner:
                 if slot:
                     return slot
         return None
+
+    def scan_all(self) -> list[Slot]:
+        """Return every available slot across all priorities (used for the
+        general checks, to alert on everything that's bookable)."""
+        if hasattr(self._probe, "clear_cache"):
+            self._probe.clear_cache()
+        slots: list[Slot] = []
+        for day, time in self._priorities:
+            for court_url in self._courts:
+                slot = self._probe(court_url, day, time)
+                if slot:
+                    slots.append(slot)
+        return slots
 
 
 def build_priorities(
@@ -173,6 +189,7 @@ def make_probe(session, duration_minutes: int = 60, today: date | None = None):
                         venue_slug=slug,
                         day=day,
                         time=time,
+                        date_str=date_str,
                         booking_url=_build_booking_url(
                             venue_slug=slug,
                             resource_id=resource["ID"],

@@ -33,6 +33,9 @@ class Scheduler:
         self._release_hour = release_hour
         self._now = now
         self._sleep = sleep
+        # Slots already alerted in general checks, so we don't re-notify the
+        # same bookable slot every cycle. Keyed by (venue, date, time).
+        self._notified: set[tuple[str, str, str]] = set()
 
     def run_forever(self) -> None:
         log.info(
@@ -82,14 +85,22 @@ class Scheduler:
 
     def _poll_once(self, label: str) -> None:
         log.info("Running %s", label)
-        slot = self._scanner.scan()
-        if slot is not None:
-            self._notify_slot(slot)
-        else:
+        slots = self._scanner.scan_all()
+        if not slots:
             log.info("No slots found")
+            return
+        new = [s for s in slots if self._slot_key(s) not in self._notified]
+        log.info("%d slot(s) available, %d new", len(slots), len(new))
+        for slot in new:
+            self._notify_slot(slot)
+
+    @staticmethod
+    def _slot_key(slot: Slot) -> tuple[str, str, str]:
+        return (slot.venue_slug, slot.date_str, slot.time)
 
     def _notify_slot(self, slot: Slot) -> None:
         log.info("Slot found: %s %s %s", slot.court_name, slot.day, slot.time)
+        self._notified.add(self._slot_key(slot))
         self._notifier.send_slot_found(
             SlotFound(
                 court_name=slot.court_name,
