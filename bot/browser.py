@@ -13,6 +13,7 @@ nodriver is async; this wraps it in a persistent event loop so the rest of the
 import asyncio
 import json
 import logging
+import shutil
 
 log = logging.getLogger(__name__)
 
@@ -41,15 +42,28 @@ class BrowserSession:
         return self._loop.run_until_complete(coro)
 
     def start(self) -> None:
-        self._run(self._start())
+        try:
+            self._run(self._start())
+        except Exception as exc:  # noqa: BLE001
+            # A profile left by a different Chrome build (or a crash) can stop
+            # Chrome starting. Wipe it and retry once from a clean profile.
+            log.warning("Browser start failed (%s); wiping profile and retrying", exc)
+            shutil.rmtree(self._profile_dir, ignore_errors=True)
+            self._run(self._start())
 
     async def _start(self) -> None:
         import nodriver as uc
 
+        browser_args = [
+            "--no-sandbox",
+            "--disable-dev-shm-usage",  # /dev/shm is tiny in Docker; avoid crashes
+            "--disable-blink-features=AutomationControlled",
+        ]
         kwargs = dict(
             headless=self._headless,
             user_data_dir=self._profile_dir,
             sandbox=False,
+            browser_args=browser_args,
         )
         if self._executable_path:
             kwargs["browser_executable_path"] = self._executable_path
