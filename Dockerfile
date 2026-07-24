@@ -10,14 +10,16 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
-# Install real Google Chrome (channel "chrome") plus OS dependencies
-RUN uv run playwright install --with-deps chrome
-
-# Xvfb lets us run Chrome in true headful mode (headless is more likely to be
-# escalated to an interactive Cloudflare challenge).
+# Install real Google Chrome, plus Xvfb (nodriver drives Chrome headful under a
+# virtual display) and xauth (needed by X).
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends xvfb xauth && \
+    apt-get install -y --no-install-recommends wget gnupg ca-certificates && \
+    wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && \
+    apt-get install -y --no-install-recommends /tmp/chrome.deb xvfb xauth && \
+    rm -f /tmp/chrome.deb && \
     rm -rf /var/lib/apt/lists/*
+
+ENV BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 
 COPY bot/ bot/
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh

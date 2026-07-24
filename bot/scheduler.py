@@ -8,7 +8,7 @@ log = logging.getLogger(__name__)
 
 from bot.config import load_config
 from bot.notifier import Notifier, NtfyNotifier, SlotFound
-from bot.scanner import CourtScanner, Slot, build_priorities, make_playwright_probe
+from bot.scanner import CourtScanner, Slot, build_priorities, make_probe
 
 
 RETRY_WINDOW = timedelta(minutes=5)
@@ -168,53 +168,41 @@ def main() -> int:
 
     import os
 
-    from playwright.sync_api import sync_playwright
+    from bot.browser import BrowserSession
 
-    # Real Chrome (channel="chrome") clears Cloudflare where bundled Chromium
-    # cannot. A persistent profile keeps the cf_clearance cookie between runs.
-    channel = os.environ.get("BROWSER_CHANNEL", "chrome") or None
+    # nodriver drives real Chrome directly over the DevTools socket, avoiding
+    # the CDP automation fingerprint that gets Playwright blocked by Cloudflare.
+    # A persistent profile keeps the cf_clearance cookie between runs. Runs
+    # headful under Xvfb by default (see Dockerfile); HEADLESS=1 forces headless.
     profile_dir = os.environ.get("BROWSER_PROFILE_DIR", "/app/.state/chrome-profile")
+    executable_path = os.environ.get("BROWSER_EXECUTABLE_PATH") or None
+    headless = os.environ.get("HEADLESS") == "1"
 
-    with sync_playwright() as pw:
-        # True headful under Xvfb (see Dockerfile). Headful real Chrome is far
-        # less likely to be escalated to an interactive Cloudflare challenge
-        # than headless. Set HEADLESS=1 to force headless (e.g. local testing).
-        headless = os.environ.get("HEADLESS") == "1"
-        args = ["--disable-blink-features=AutomationControlled", "--no-sandbox"]
-        if headless:
-            args.insert(0, "--headless=new")
-        ctx = pw.chromium.launch_persistent_context(
-            user_data_dir=profile_dir,
-            channel=channel,
-            headless=headless,
-            args=args,
-            viewport={"width": 1280, "height": 800},
-            locale="en-GB",
-            timezone_id="Europe/London",
-        )
-        page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        page.add_init_script(
-            'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-        )
+    session = BrowserSession(
+        profile_dir=profile_dir,
+        headless=headless,
+        executable_path=executable_path,
+    )
+    session.start()
 
-        scanner = CourtScanner(
-            availability_probe=make_playwright_probe(
-                page,
-                duration_minutes=config.slot_duration_hours * 60,
-            ),
-            courts=config.courts,
-            priorities=priorities,
-        )
+    scanner = CourtScanner(
+        availability_probe=make_probe(
+            session,
+            duration_minutes=config.slot_duration_hours * 60,
+        ),
+        courts=config.courts,
+        priorities=priorities,
+    )
 
-        try:
-            Scheduler(
-                scanner,
-                notifier,
-                duration_hours=config.slot_duration_hours,
-                release_hour=config.release_hour,
-            ).run_forever()
-        finally:
-            ctx.close()
+    try:
+        Scheduler(
+            scanner,
+            notifier,
+            duration_hours=config.slot_duration_hours,
+            release_hour=config.release_hour,
+        ).run_forever()
+    finally:
+        session.stop()
 
     return 0
 

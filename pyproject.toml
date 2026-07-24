@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Scans ClubSpark for tennis court slots and notifies via push/SMS."
 requires-python = ">=3.11"
 dependencies = [
-    "playwright>=1.52.0",
+    "nodriver>=0.50.3",
     "python-dotenv>=1.2.2",
     "twilio>=9.10.5",
 ]

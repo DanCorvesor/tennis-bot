@@ -1,4 +1,3 @@
-import json
 import logging
 import re
 from dataclasses import dataclass
@@ -100,18 +99,12 @@ def _build_booking_url(
     return f"{base}?{urlencode(params)}"
 
 
-_FETCH_JS = """async ({url}) => {
-    const resp = await fetch(url, {headers: {'Accept': 'application/json'}});
-    return { status: resp.status, body: await resp.text() };
-}"""
-
-
-def make_playwright_probe(page, duration_minutes: int = 60, today: date | None = None):
-    """Scan via the ClubSpark API, but fetched from inside a real browser.
+def make_probe(session, duration_minutes: int = 60, today: date | None = None):
+    """Scan via the ClubSpark API, fetched from inside a real (nodriver) browser.
 
     Navigating a booking page clears the Cloudflare challenge and sets the
-    cf_clearance cookie; subsequent API calls are made with page.evaluate(fetch)
-    so they reuse that cleared session instead of being blocked as a bot.
+    cf_clearance cookie; the GetVenueSessions API is then fetched from within
+    that cleared page so it reuses the session instead of being blocked.
     """
     _fixed_today = today
     cache: dict[tuple[str, str], dict] = {}
@@ -120,47 +113,19 @@ def make_playwright_probe(page, duration_minutes: int = 60, today: date | None =
     def clear_cache() -> None:
         cache.clear()
 
-    def _try_click_turnstile() -> None:
-        """Click the Cloudflare Turnstile checkbox if the interactive
-        challenge is shown (escalated from the passive managed challenge)."""
-        try:
-            frame = page.frame_locator(
-                'iframe[src*="challenges.cloudflare.com"]'
-            )
-            checkbox = frame.locator('input[type="checkbox"]')
-            checkbox.click(timeout=5000)
-        except Exception:
-            pass
-
     def _ensure_cloudflare_cleared(court_url: str, date_str: str) -> None:
         base = f"{court_url.rstrip('/')}/Booking/BookByDate"
         full_url = f"{base}#?date={date_str}&role=member"
-        page.goto(full_url, wait_until="domcontentloaded", timeout=60000)
-        try:
-            page.wait_for_function(
-                "document.title !== 'Just a moment...'", timeout=25000,
-            )
-        except Exception:
-            # Interactive Turnstile — click the checkbox and wait longer
-            _try_click_turnstile()
-            page.wait_for_function(
-                "document.title !== 'Just a moment...'", timeout=45000,
-            )
-        accept_btn = page.get_by_role("button", name="Accept All")
-        if accept_btn.is_visible():
-            accept_btn.click()
+        session.clear_cloudflare(full_url)
         _cleared[0] = True
 
-    def _fetch_sessions(slug: str, date_str: str) -> dict | None:
+    def _fetch_sessions(slug: str, date_str: str) -> dict:
         api_url = (
             f"https://clubspark.lta.org.uk/v0/VenueBooking/{slug}"
             f"/GetVenueSessions?resourceID=&startDate={date_str}"
             f"&endDate={date_str}&roleId="
         )
-        result = page.evaluate(_FETCH_JS, {"url": api_url})
-        if result["status"] != 200:
-            raise RuntimeError(f"API returned HTTP {result['status']}")
-        return json.loads(result["body"])
+        return session.fetch_json(api_url)
 
     def probe(court_url: str, day: str, time: str) -> Slot | None:
         slug = _venue_slug(court_url)
