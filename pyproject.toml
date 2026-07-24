@@ -5,6 +5,7 @@ description = "Scans ClubSpark for tennis court slots and notifies via push/SMS.
 requires-python = ">=3.11"
 dependencies = [
     "nodriver>=0.50.3",
+    "opencv-python-headless>=4.10.0",
     "python-dotenv>=1.2.2",
     "twilio>=9.10.5",
 ]

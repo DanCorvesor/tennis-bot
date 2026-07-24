@@ -76,18 +76,19 @@ class BrowserSession:
 
     async def _clear_cloudflare(self, page_url: str) -> None:
         self._tab = await self._browser.get(page_url)
-        # nodriver ships a Cloudflare helper; use it if present.
-        verify = getattr(self._tab, "verify_cf", None)
-        if verify is not None:
-            try:
-                await verify()
-            except Exception as exc:  # noqa: BLE001
-                log.debug("verify_cf failed: %s", exc)
-        for _ in range(30):
-            title = await self._tab.evaluate("document.title")
-            if title and "Just a moment" not in str(title):
-                return
+        for i in range(40):
             await asyncio.sleep(1)
+            title = str(await self._tab.evaluate("document.title") or "")
+            if title and "Just a moment" not in title:
+                return
+            # Periodically attempt to click the interactive Turnstile checkbox
+            # (nodriver locates it via OpenCV template matching). The passive
+            # managed challenge clears on its own; this handles escalation.
+            if i in (3, 8, 15, 25):
+                try:
+                    await self._tab.verify_cf()
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("verify_cf attempt failed: %s", exc)
         raise RuntimeError("Cloudflare challenge did not clear")
 
     def fetch_json(self, api_url: str) -> dict:
