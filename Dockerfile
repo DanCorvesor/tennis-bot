@@ -20,8 +20,9 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY bot/ bot/
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENV PYTHONUNBUFFERED=1
 
-ENTRYPOINT ["xvfb-run", "-a", "--server-args=-screen 0 1280x800x24", \
-            "uv", "run", "python", "-m", "bot.scheduler"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
