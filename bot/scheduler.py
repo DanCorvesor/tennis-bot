@@ -91,25 +91,31 @@ class Scheduler:
             return
         new = [s for s in slots if self._slot_key(s) not in self._notified]
         log.info("%d slot(s) available, %d new", len(slots), len(new))
+        if not new:
+            return
+        # One notification per day, listing every new slot for that day.
+        self._notifier.send_slots([self._to_slot_found(s) for s in new])
         for slot in new:
-            self._notify_slot(slot)
+            self._notified.add(self._slot_key(slot))
 
     @staticmethod
     def _slot_key(slot: Slot) -> tuple[str, str, str]:
         return (slot.venue_slug, slot.date_str, slot.time)
 
+    def _to_slot_found(self, slot: Slot) -> SlotFound:
+        return SlotFound(
+            court_name=slot.court_name,
+            day=slot.day,
+            time=slot.time,
+            duration_hours=self._duration_hours,
+            basket_url=slot.booking_url,
+            date_str=slot.date_str,
+        )
+
     def _notify_slot(self, slot: Slot) -> None:
         log.info("Slot found: %s %s %s", slot.court_name, slot.day, slot.time)
         self._notified.add(self._slot_key(slot))
-        self._notifier.send_slot_found(
-            SlotFound(
-                court_name=slot.court_name,
-                day=slot.day,
-                time=slot.time,
-                duration_hours=self._duration_hours,
-                basket_url=slot.booking_url,
-            )
-        )
+        self._notifier.send_slot_found(self._to_slot_found(slot))
 
     def _in_release_window(self, now: datetime) -> bool:
         release_at = now.replace(
@@ -127,12 +133,9 @@ class Scheduler:
             return
 
         if HOURLY_START <= hour < HOURLY_END:
-            if now.minute < 30:
-                next_check = now.replace(minute=30, second=0, microsecond=0)
-            else:
-                next_check = (now + timedelta(hours=1)).replace(
-                    minute=0, second=0, microsecond=0,
-                )
+            next_check = (now + timedelta(hours=1)).replace(
+                minute=0, second=0, microsecond=0,
+            )
         elif hour < HOURLY_START:
             next_check = now.replace(
                 hour=HOURLY_START, minute=0, second=0, microsecond=0,
