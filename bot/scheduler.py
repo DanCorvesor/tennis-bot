@@ -93,10 +93,13 @@ class Scheduler:
         log.info("%d slot(s) available, %d new", len(slots), len(new))
         if not new:
             return
-        # One notification per day, listing every new slot for that day.
-        self._notifier.send_slots([self._to_slot_found(s) for s in new])
+        # One notification per court per day. Only dedup slots that actually
+        # sent, so a failed send is retried on the next check.
+        sent = self._notifier.send_slots([self._to_slot_found(s) for s in new])
+        sent_keys = {(sf.court_name, sf.date_str, sf.time) for sf in sent}
         for slot in new:
-            self._notified.add(self._slot_key(slot))
+            if (slot.court_name, slot.date_str, slot.time) in sent_keys:
+                self._notified.add(self._slot_key(slot))
 
     @staticmethod
     def _slot_key(slot: Slot) -> tuple[str, str, str]:

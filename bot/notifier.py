@@ -1,5 +1,9 @@
+import logging
+import time
 from dataclasses import dataclass
 from urllib.request import Request, urlopen
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -71,21 +75,25 @@ def _slugify(name: str) -> str:
 
 def _group_by_court_day(
     slots: list[SlotFound],
-) -> list[tuple[str, str, list[str]]]:
+) -> list[tuple[str, str, list[str], list[SlotFound]]]:
     """Group slots by (court, day), preserving order. Returns
-    (court_name, day_label, lines) where each line is 'TIME-RANGE: url'."""
-    groups: dict[tuple[str, str, str], list[str]] = {}
+    (court_name, day_label, lines, members) where each line is
+    'TIME-RANGE: url' and members are the SlotFound objects in that group."""
+    lines: dict[tuple[str, str, str], list[str]] = {}
+    members: dict[tuple[str, str, str], list[SlotFound]] = {}
     labels: dict[tuple[str, str, str], str] = {}
     order: list[tuple[str, str, str]] = []
     for s in slots:
         key = (s.court_name, s.day, s.date_str)
-        if key not in groups:
-            groups[key] = []
+        if key not in lines:
+            lines[key] = []
+            members[key] = []
             labels[key] = f"{s.day} ({s.date_str})" if s.date_str else s.day
             order.append(key)
         time_range = _format_time_range(s.time, s.duration_hours)
-        groups[key].append(f"{time_range}: {s.basket_url}")
-    return [(k[0], labels[k], groups[k]) for k in order]
+        lines[key].append(f"{time_range}: {s.basket_url}")
+        members[key].append(s)
+    return [(k[0], labels[k], lines[k], members[k]) for k in order]
 
 
 class NtfyNotifier:
@@ -97,7 +105,7 @@ class NtfyNotifier:
 
     def _publish(
         self, topic: str, title: str, body: str, click: str | None = None
-    ) -> None:
+    ) -> bool:
         url = f"https://ntfy.sh/{topic}"
         req = Request(url, data=body.encode())
         req.add_header("Title", title)
@@ -106,7 +114,17 @@ class NtfyNotifier:
         if click:
             req.add_header("Click", click)
             req.add_header("Actions", f"view, Book now, {click}")
-        urlopen(req)
+        for attempt in range(3):
+            try:
+                urlopen(req, timeout=15)
+                return True
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "ntfy publish to %s failed (attempt %d/3): %s",
+                    topic, attempt + 1, exc,
+                )
+                time.sleep(2 * (attempt + 1))
+        return False
 
     def send_slot_found(self, slot: SlotFound) -> None:
         # Single slot (release window): keep it simple, on the court's topic.
@@ -117,12 +135,20 @@ class NtfyNotifier:
             self._topic_for(slot.court_name), title, body, click=slot.basket_url
         )
 
-    def send_slots(self, slots: list[SlotFound]) -> None:
-        # One message per court per day, on that court's topic.
-        for court_name, day_label, lines in _group_by_court_day(slots):
+    def send_slots(self, slots: list[SlotFound]) -> list[SlotFound]:
+        # One message per court per day, on that court's topic. Returns the
+        # slots whose message was sent OK, so callers only dedup those.
+        sent: list[SlotFound] = []
+        groups = _group_by_court_day(slots)
+        for i, (court_name, day_label, lines, members) in enumerate(groups):
             title = f"Tennis: {court_name} {day_label} — {len(lines)} slot(s)"
             body = "\n".join(lines)
-            self._publish(self._topic_for(court_name), title, body)
+            if self._publish(self._topic_for(court_name), title, body):
+                sent.extend(members)
+            # Space out messages to avoid ntfy.sh rate limiting.
+            if i < len(groups) - 1:
+                time.sleep(1)
+        return sent
 
     def send_nothing_available(self) -> None:
         url = f"https://ntfy.sh/{self._prefix}"
