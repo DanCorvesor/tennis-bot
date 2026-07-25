@@ -108,7 +108,9 @@ class NtfyNotifier:
     ) -> bool:
         url = f"https://ntfy.sh/{topic}"
         req = Request(url, data=body.encode())
-        req.add_header("Title", title)
+        # HTTP headers are latin-1; keep the Title ASCII-safe.
+        safe_title = title.encode("ascii", "replace").decode("ascii")
+        req.add_header("Title", safe_title)
         req.add_header("Priority", "high")
         req.add_header("Tags", "tennis")
         if click:
@@ -141,7 +143,7 @@ class NtfyNotifier:
         sent: list[SlotFound] = []
         groups = _group_by_court_day(slots)
         for i, (court_name, day_label, lines, members) in enumerate(groups):
-            title = f"Tennis: {court_name} {day_label} — {len(lines)} slot(s)"
+            title = f"Tennis: {court_name} {day_label} - {len(lines)} slot(s)"
             body = "\n".join(lines)
             if self._publish(self._topic_for(court_name), title, body):
                 sent.extend(members)
