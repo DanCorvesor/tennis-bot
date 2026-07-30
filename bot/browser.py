@@ -7,7 +7,8 @@ that middleware, so it clears Cloudflare's managed/Turnstile challenge where
 Playwright cannot.
 
 nodriver is async; this wraps it in a persistent event loop so the rest of the
-(synchronous) bot can call it without caring.
+(synchronous) bot can call it without caring. The session self-heals: it
+cleans up orphaned Chrome before starting, and restarts a dead browser mid-run.
 """
 
 import asyncio
@@ -27,6 +28,29 @@ _FETCH_JS = """(async () => {
     return JSON.stringify({status: r.status, body: await r.text()});
 })()"""
 
+# Lean flags to keep a long-running Chrome's footprint down (it lives for days).
+_CHROME_ARGS = [
+    "--no-sandbox",
+    "--disable-dev-shm-usage",  # /dev/shm is tiny in Docker; avoid crashes
+    "--disable-blink-features=AutomationControlled",
+    "--disable-gpu",
+    "--disable-extensions",
+    "--disable-background-networking",
+    "--disk-cache-size=1",  # don't let the on-disk cache grow unbounded
+    "--disable-crash-reporter",
+]
+
+
+def _free_mem_mb() -> str:
+    try:
+        with open("/proc/meminfo") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable"):
+                    return f"{int(line.split()[1]) // 1024} MB available"
+    except Exception:  # noqa: BLE001
+        pass
+    return "unknown"
+
 
 class BrowserSession:
     def __init__(
@@ -45,34 +69,39 @@ class BrowserSession:
     def _run(self, coro):
         return self._loop.run_until_complete(coro)
 
+    def _cleanup(self, wipe_profile: bool = False) -> None:
+        """Kill orphaned Chrome and clear locks so a fresh launch can connect.
+        Optionally wipe the whole profile (loses cf_clearance — last resort)."""
+        subprocess.run(["pkill", "-9", "-f", "google-chrome"], check=False)
+        time.sleep(1)
+        if wipe_profile:
+            shutil.rmtree(self._profile_dir, ignore_errors=True)
+            return
+        for lock in glob.glob(f"{self._profile_dir}/Singleton*"):
+            try:
+                os.remove(lock)
+            except OSError:
+                pass
+
     def start(self) -> None:
         # nodriver waits only ~2.75s for Chrome to open its debug port; on a
-        # loaded/slow host Chrome can take longer, so retry. A failed attempt
-        # may leave an orphaned Chrome holding the profile — kill it first.
+        # loaded host Chrome can take longer, so retry. Clean up leftover Chrome
+        # before the first attempt (the usual "worked then won't restart"
+        # cause), and only wipe the profile as a last resort so cf_clearance
+        # survives across restarts.
         attempts = 6
         for attempt in range(attempts):
+            self._cleanup(wipe_profile=(attempt >= attempts - 2))
             try:
                 self._run(self._start())
+                log.info("Browser started (attempt %d)", attempt + 1)
                 return
             except Exception as exc:  # noqa: BLE001
-                msg = " ".join(str(exc).split())[:100]
+                msg = " ".join(str(exc).split())[:120]
                 log.warning(
-                    "Browser start attempt %d/%d failed: %s",
-                    attempt + 1, attempts, msg,
+                    "Browser start attempt %d/%d failed: %s (mem: %s)",
+                    attempt + 1, attempts, msg, _free_mem_mb(),
                 )
-                subprocess.run(
-                    ["pkill", "-9", "-f", "google-chrome"], check=False
-                )
-                if attempt == 0:
-                    # Profile from a different Chrome build can block startup.
-                    shutil.rmtree(self._profile_dir, ignore_errors=True)
-                else:
-                    # A killed Chrome can leave a lock that blocks the next launch.
-                    for lock in glob.glob(f"{self._profile_dir}/Singleton*"):
-                        try:
-                            os.remove(lock)
-                        except OSError:
-                            pass
                 if attempt < attempts - 1:
                     time.sleep(3)
         raise RuntimeError(f"Browser failed to start after {attempts} attempts")
@@ -80,28 +109,37 @@ class BrowserSession:
     async def _start(self) -> None:
         import nodriver as uc
 
-        browser_args = [
-            "--no-sandbox",
-            "--disable-dev-shm-usage",  # /dev/shm is tiny in Docker; avoid crashes
-            "--disable-blink-features=AutomationControlled",
-        ]
         kwargs = dict(
             headless=self._headless,
             user_data_dir=self._profile_dir,
             sandbox=False,
-            browser_args=browser_args,
+            browser_args=list(_CHROME_ARGS),
         )
         if self._executable_path:
             kwargs["browser_executable_path"] = self._executable_path
         self._browser = await uc.start(**kwargs)
 
+    def restart(self) -> None:
+        log.warning("Restarting browser")
+        self.stop()
+        self._browser = None
+        self._tab = None
+        self.start()
+
     def clear_cloudflare(self, page_url: str) -> None:
         """Navigate to a page on the domain and wait for the Cloudflare
-        challenge to resolve, establishing the cf_clearance cookie."""
-        self._run(self._clear_cloudflare(page_url))
+        challenge to resolve. Restarts the browser once if it has died."""
+        try:
+            self._run(self._clear_cloudflare(page_url))
+        except _BrowserDead:
+            self.restart()
+            self._run(self._clear_cloudflare(page_url))
 
     async def _clear_cloudflare(self, page_url: str) -> None:
-        self._tab = await self._browser.get(page_url)
+        try:
+            self._tab = await self._browser.get(page_url)
+        except Exception as exc:  # noqa: BLE001
+            raise _BrowserDead(str(exc)) from exc
         for i in range(40):
             await asyncio.sleep(1)
             title = str(await self._tab.evaluate("document.title") or "")
@@ -136,3 +174,7 @@ class BrowserSession:
                 self._browser.stop()
             except Exception:  # noqa: BLE001
                 pass
+
+
+class _BrowserDead(Exception):
+    """Raised when the browser connection is gone and needs a restart."""
