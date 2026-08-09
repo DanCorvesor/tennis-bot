@@ -20,6 +20,10 @@ class Slot:
 AvailabilityProbe = Callable[[str, str, str], Slot | None]
 
 
+def slot_key(slot: Slot) -> tuple[str, str, str]:
+    return (slot.venue_slug, slot.date_str, slot.time)
+
+
 class CourtScanner:
     """Scans each court URL for the highest-priority available slot."""
 
@@ -33,15 +37,19 @@ class CourtScanner:
         self._courts = courts
         self._priorities = priorities
 
-    def scan(self) -> Slot | None:
+    def scan(
+        self, exclude: set[tuple[str, str, str]] | None = None
+    ) -> Slot | None:
         """Return the highest-priority available slot, stopping at the first
-        match (used at the release window to grab the best slot fast)."""
+        match (used at the release window to grab the best slot fast). Slots
+        whose key is in `exclude` are skipped, so already-notified slots
+        don't shadow genuinely new ones."""
         if hasattr(self._probe, "clear_cache"):
             self._probe.clear_cache()
         for day, time in self._priorities:
             for court_url in self._courts:
                 slot = self._probe(court_url, day, time)
-                if slot:
+                if slot and (exclude is None or slot_key(slot) not in exclude):
                     return slot
         return None
 

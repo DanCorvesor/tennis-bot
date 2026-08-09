@@ -8,7 +8,7 @@ log = logging.getLogger(__name__)
 
 from bot.config import load_config
 from bot.notifier import Notifier, NtfyNotifier, SlotFound
-from bot.scanner import CourtScanner, Slot, build_priorities, make_probe
+from bot.scanner import CourtScanner, Slot, build_priorities, make_probe, slot_key
 
 
 RETRY_WINDOW = timedelta(minutes=5)
@@ -71,12 +71,15 @@ class Scheduler:
         poll_count = 0
         while True:
             poll_count += 1
-            slot = self._scanner.scan()
+            # Skip already-notified slots (e.g. an unpopular slot that sits
+            # free for days) so release alerts only fire for new ones.
+            slot = self._scanner.scan(exclude=self._notified)
             if slot is not None:
                 self._notify_slot(slot)
+                self._sleep_past(deadline)
                 return
             if self._now() >= deadline:
-                log.info("Release window ended after %d polls, no slots", poll_count)
+                log.info("Release window ended after %d polls, no new slots", poll_count)
                 self._notifier.send_nothing_available()
                 return
             interval = poll_interval_seconds(self._now(), release_at)
@@ -101,9 +104,17 @@ class Scheduler:
             if (slot.court_name, slot.date_str, slot.time) in sent_keys:
                 self._notified.add(self._slot_key(slot))
 
+    def _sleep_past(self, deadline: datetime) -> None:
+        # run_forever re-enters _run_day while still inside the release
+        # window; sleep the window out so the slot just notified isn't
+        # scanned and re-sent on the next pass.
+        remaining = (deadline - self._now()).total_seconds()
+        if remaining >= 0:
+            self._sleep(remaining + 1)
+
     @staticmethod
     def _slot_key(slot: Slot) -> tuple[str, str, str]:
-        return (slot.venue_slug, slot.date_str, slot.time)
+        return slot_key(slot)
 
     def _to_slot_found(self, slot: Slot) -> SlotFound:
         return SlotFound(

@@ -74,9 +74,9 @@ def test_ntfy_config(tmp_path: Path):
     assert cfg.sms_recipients is None
 
 
-def test_preferred_times_is_ordered_list(env_file: Path):
+def test_legacy_days_and_times_become_single_schedule_group(env_file: Path):
     cfg = load_config(env_file)
-    assert cfg.preferred_times == ["10:00", "11:00", "09:00"]
+    assert cfg.schedule == [(["Saturday", "Sunday"], ["10:00", "11:00", "09:00"])]
 
 
 def test_courts_is_list_of_urls(env_file: Path):
@@ -93,9 +93,14 @@ def test_sms_recipients_is_list_of_name_number_tuples(env_file: Path):
     assert cfg.sms_recipients == [("Alice", "+447512211264"), ("Bob", "+447700900001")]
 
 
-def test_booking_days_is_list(env_file: Path):
+def test_booking_schedule_takes_priority_over_legacy_fields(env_file: Path):
+    env = env_file.read_text() + "\nBOOKING_SCHEDULE=Saturday=10:00;Monday,Tuesday=18:00,19:00"
+    env_file.write_text(env)
     cfg = load_config(env_file)
-    assert cfg.booking_days == ["Saturday", "Sunday"]
+    assert cfg.schedule == [
+        (["Saturday"], ["10:00"]),
+        (["Monday", "Tuesday"], ["18:00", "19:00"]),
+    ]
 
 
 def test_slot_duration_hours_is_int(env_file: Path):

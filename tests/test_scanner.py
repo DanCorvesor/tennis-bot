@@ -5,6 +5,7 @@ from bot.scanner import (
     Slot,
     build_priorities,
     court_name_from_url,
+    slot_key,
 )
 
 
@@ -102,8 +103,25 @@ def test_short_circuits_on_first_match_without_probing_lower_priorities():
     probe.assert_called_once_with(COURTS[0], "Saturday", "10:00")
 
 
+def test_scan_skips_excluded_slots():
+    available = {
+        (COURTS[1], "Saturday", "10:00"): _slot(COURTS[1], "Saturday", "10:00"),
+        (COURTS[2], "Saturday", "11:00"): _slot(COURTS[2], "Saturday", "11:00"),
+    }
+    scanner = CourtScanner(probe_returning(available), COURTS, PRIORITIES)
+
+    best = scanner.scan()
+    assert best.venue_slug == "BrunswickPark"
+
+    second = scanner.scan(exclude={slot_key(best)})
+    assert second.venue_slug == "BurgessParkSouthwark"
+
+    assert scanner.scan(exclude={slot_key(best), slot_key(second)}) is None
+
+
 def test_build_priorities_matches_prd_order():
-    assert build_priorities(["Saturday", "Sunday"], ["10:00", "11:00", "09:00"]) == PRIORITIES
+    schedule = [(["Saturday", "Sunday"], ["10:00", "11:00", "09:00"])]
+    assert build_priorities(schedule) == PRIORITIES
 
 
 def test_court_name_from_url_is_readable():

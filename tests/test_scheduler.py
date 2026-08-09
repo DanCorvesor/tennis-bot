@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
 from bot.notifier import SlotFound
-from bot.scanner import Slot
+from bot.scanner import CourtScanner, Slot, slot_key
 from bot.scheduler import Scheduler, poll_interval_seconds
 
 
@@ -53,6 +53,46 @@ def test_release_window_finds_slot_and_notifies():
     assert sent.court_name == "Southwark Park"
 
 
+def _always_available_scanner(slot: Slot) -> CourtScanner:
+    return CourtScanner(
+        lambda *args: slot,
+        courts=["https://clubspark.lta.org.uk/SouthwarkPark"],
+        priorities=[("Saturday", "10:00")],
+    )
+
+
+def test_release_window_skips_already_notified_slot():
+    slot = _slot()
+    notifier = MagicMock()
+    clock = FakeClock(datetime(2026, 4, 18, 20, 0, 0))
+    s = _scheduler(_always_available_scanner(slot), notifier, clock)
+    s._notified.add(slot_key(slot))
+
+    s._poll_release()
+
+    notifier.send_slot_found.assert_not_called()
+    notifier.send_nothing_available.assert_called_once()
+
+
+def test_release_window_notifies_once_then_sleeps_out_window():
+    slot = _slot()
+    notifier = MagicMock()
+    clock = FakeClock(datetime(2026, 4, 18, 20, 0, 0))
+    s = _scheduler(_always_available_scanner(slot), notifier, clock)
+
+    s._poll_release()
+    notifier.send_slot_found.assert_called_once()
+    # Slept past the retry window, so run_forever won't re-enter the
+    # release poll and re-send the same slot.
+    assert not s._in_release_window(clock.t)
+
+    # Next day's release: same slot still free — no repeat notification.
+    clock.t = datetime(2026, 4, 19, 20, 0, 0)
+    s._poll_release()
+    notifier.send_slot_found.assert_called_once()
+    notifier.send_nothing_available.assert_called_once()
+
+
 def test_release_window_sends_nothing_after_timeout():
     scanner = MagicMock()
     scanner.scan.return_value = None
@@ -68,24 +108,33 @@ def test_release_window_sends_nothing_after_timeout():
 
 def test_hourly_check_finds_slot():
     scanner = MagicMock()
-    scanner.scan.return_value = _slot()
+    scanner.scan_all.return_value = [_slot()]
     notifier = MagicMock()
+    notifier.send_slots.side_effect = lambda slots: slots
 
     clock = FakeClock(datetime(2026, 4, 18, 14, 0, 0))
-    _scheduler(scanner, notifier, clock)._poll_once("test")
+    scheduler = _scheduler(scanner, notifier, clock)
+    scheduler._poll_once("test")
 
-    notifier.send_slot_found.assert_called_once()
+    notifier.send_slots.assert_called_once()
+    sent = notifier.send_slots.call_args.args[0]
+    assert len(sent) == 1
+    assert isinstance(sent[0], SlotFound)
+
+    # Second check: already notified, so nothing is re-sent.
+    scheduler._poll_once("test")
+    notifier.send_slots.assert_called_once()
 
 
 def test_hourly_check_no_slot():
     scanner = MagicMock()
-    scanner.scan.return_value = None
+    scanner.scan_all.return_value = []
     notifier = MagicMock()
 
     clock = FakeClock(datetime(2026, 4, 18, 14, 0, 0))
     _scheduler(scanner, notifier, clock)._poll_once("test")
 
-    notifier.send_slot_found.assert_not_called()
+    notifier.send_slots.assert_not_called()
     notifier.send_nothing_available.assert_not_called()
 
 
@@ -112,7 +161,7 @@ def test_sleep_until_next_window_after_hours():
     s = _scheduler(MagicMock(), MagicMock(), clock)
     s._sleep_until_next_window()
     assert len(clock.sleeps) == 1
-    assert clock.t.hour == 9
+    assert clock.t.hour == 8
     assert clock.t.day == 19
 
 

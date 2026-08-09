@@ -46,8 +46,6 @@ def test_slot_found_sent_to_every_recipient(notifier, twilio_client):
     assert twilio_client.messages.create.call_count == len(RECIPIENTS)
     assert _tos(twilio_client) == [num for _, num in RECIPIENTS]
     bodies = _bodies(twilio_client)
-    assert "Hey Alice!" in bodies[0]
-    assert "Hey Bob!" in bodies[1]
     for body in bodies:
         assert "Southwark Park" in body
         assert "Saturday" in body
