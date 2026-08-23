@@ -8,7 +8,9 @@ Playwright cannot.
 
 nodriver is async; this wraps it in a persistent event loop so the rest of the
 (synchronous) bot can call it without caring. The session self-heals: it
-cleans up orphaned Chrome before starting, and restarts a dead browser mid-run.
+cleans up orphaned Chrome before starting, restarts a dead browser mid-run,
+and puts a hard timeout on every browser call so a wedged tab (which never
+raises — it just never answers) can't silently freeze the bot.
 """
 
 import asyncio
@@ -66,8 +68,11 @@ class BrowserSession:
         self._browser = None
         self._tab = None
 
-    def _run(self, coro):
-        return self._loop.run_until_complete(coro)
+    def _run(self, coro, timeout: float = 60):
+        # Every CDP call gets a hard deadline: a wedged tab (crashed renderer,
+        # stalled in-page fetch) never raises — it just never answers, which
+        # would freeze the whole single-threaded bot forever.
+        return self._loop.run_until_complete(asyncio.wait_for(coro, timeout))
 
     def _cleanup(self, wipe_profile: bool = False) -> None:
         """Kill orphaned Chrome and clear locks so a fresh launch can connect.
@@ -128,12 +133,16 @@ class BrowserSession:
 
     def clear_cloudflare(self, page_url: str) -> None:
         """Navigate to a page on the domain and wait for the Cloudflare
-        challenge to resolve. Restarts the browser once if it has died."""
+        challenge to resolve. Restarts the browser once if it has died or
+        stopped answering."""
+        # The challenge loop legitimately takes up to ~40s of polling plus
+        # verify_cf attempts, so this deadline is generous.
         try:
-            self._run(self._clear_cloudflare(page_url))
-        except _BrowserDead:
+            self._run(self._clear_cloudflare(page_url), timeout=180)
+        except (_BrowserDead, TimeoutError) as exc:
+            log.warning("Browser unresponsive (%s); restarting", type(exc).__name__)
             self.restart()
-            self._run(self._clear_cloudflare(page_url))
+            self._run(self._clear_cloudflare(page_url), timeout=180)
 
     async def _clear_cloudflare(self, page_url: str) -> None:
         try:
@@ -157,7 +166,14 @@ class BrowserSession:
 
     def fetch_json(self, api_url: str) -> dict:
         """Fetch a same-origin API URL from within the cleared page."""
-        return self._run(self._fetch_json(api_url))
+        try:
+            return self._run(self._fetch_json(api_url))
+        except TimeoutError as exc:
+            # Restart, then surface a RuntimeError so the probe's retry path
+            # re-clears Cloudflare on the fresh tab and refetches.
+            log.warning("Browser fetch timed out; restarting")
+            self.restart()
+            raise RuntimeError("browser fetch timed out") from exc
 
     async def _fetch_json(self, api_url: str) -> dict:
         if self._tab is None:
